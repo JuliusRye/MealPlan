@@ -10,6 +10,12 @@
   --accent-soft: #e8f3ec;
   --warn: #b26a00;
   --danger: #c0392b;
+  --chip-easy-bg: #e3f4e8;
+  --chip-easy-fg: #1f6b3a;
+  --chip-medium-bg: #fdf0d9;
+  --chip-medium-fg: #8a5300;
+  --chip-hard-bg: #fbe3e0;
+  --chip-hard-fg: #a12d20;
   --radius: 12px;
   --tap: 44px;
   --tab-bar-height: 64px;
@@ -30,6 +36,12 @@
     --accent-soft: #1d3326;
     --warn: #f0a83a;
     --danger: #ef6f61;
+    --chip-easy-bg: #1d3326;
+    --chip-easy-fg: #8fdcae;
+    --chip-medium-bg: #3a2c12;
+    --chip-medium-fg: #f5c46e;
+    --chip-hard-bg: #3d1d19;
+    --chip-hard-fg: #f4a097;
   }
 }
 
@@ -64,7 +76,51 @@ button.primary {
   color: var(--accent-contrast);
 }
 
-button:focus-visible {
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+
+button.danger-outline {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+textarea {
+  resize: vertical;
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -139,4 +195,185 @@ button:focus-visible {
 
 .update-prompt span {
   flex: 1;
+}
+
+.screen-header,
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.screen-header h1 {
+  margin: 0;
+}
+
+.search {
+  margin-bottom: 12px;
+}
+
+.meal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.meal-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 16px;
+  text-align: left;
+}
+
+.meal-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.screen > .meal-meta {
+  margin-bottom: 16px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chip-easy {
+  background: var(--chip-easy-bg);
+  color: var(--chip-easy-fg);
+}
+
+.chip-medium {
+  background: var(--chip-medium-bg);
+  color: var(--chip-medium-fg);
+}
+
+.chip-hard {
+  background: var(--chip-hard-bg);
+  color: var(--chip-hard-fg);
+}
+
+.details {
+  margin: 0 0 16px;
+}
+
+.details dt {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.details dd {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.details .notes {
+  white-space: pre-wrap;
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.field label,
+.field legend {
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0;
+}
+
+.field legend {
+  margin-bottom: 4px;
+}
+
+.field-error,
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.875rem;
+}
+
+.form-error {
+  margin-bottom: 8px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.segmented label {
+  position: relative;
+  font-weight: 400;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  min-height: 0;
+}
+
+.segmented span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.segmented input:checked + span {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

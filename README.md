@@ -2,7 +2,7 @@
 
 A personal dinner planner that installs as an offline web app (PWA). All data stays on the device in IndexedDB; there is no backend. See `PLAN.md` for the full plan and `.scratch/mealplan/issues/` for the tickets.
 
-Current state (ticket 01): the app shell with four placeholder tabs (Calendar · Freezer · Meals · Settings), offline support, an update prompt and the database schema. The screens themselves come in later tickets.
+Current state (tickets 01–02): the app shell with four tabs (Calendar · Freezer · Meals · Settings), offline support, an update prompt and the database schema. The Meals tab has a working meal library (create, edit, delete, search); the other screens are still placeholders.
 
 ## First time
 
