@@ -992,3 +992,27 @@ textarea:focus-visible {
   color: var(--chip-soon-fg);
   font-size: 0.875rem;
 }
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.settings-section p {
+  margin: 0 0 12px;
+}
+
+.settings-hint {
+  color: var(--text-muted);
+}
+
+.backup-reminder {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--chip-soon-bg);
+  color: var(--chip-soon-fg);
+}
