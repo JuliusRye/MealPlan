@@ -6,10 +6,20 @@
 
 **Status:** ready-for-agent
 
-- [ ] Expiry date is required to save
-- [ ] List is sorted by expiry date ascending
-- [ ] `expiryStatus(item, today)` returns ok / soon / expired; 'soon' when today ≥ expiry minus 1 month
-- [ ] Unit tests cover the boundaries: exactly 1 month before, the expiry day itself, the day after
-- [ ] +/− buttons adjust portions; portions never go below 0
-- [ ] Used-up items appear only in the "Used up" section
-- [ ] Tab badge counts soon + expired items with portions > 0
+- [x] Expiry date is required to save
+- [x] List is sorted by expiry date ascending
+- [x] `expiryStatus(item, today)` returns ok / soon / expired; 'soon' when today ≥ expiry minus 1 month
+- [x] Unit tests cover the boundaries: exactly 1 month before, the expiry day itself, the day after
+- [x] +/− buttons adjust portions; portions never go below 0
+- [x] Used-up items appear only in the "Used up" section
+- [x] Tab badge counts soon + expired items with portions > 0
+
+## Comments
+
+**2026-10-11, implementation (agent):** Done in the working tree, not committed.
+- Logic: `src/logic/freezer.ts` (`expiryStatus`, `expiryLabel`, `splitFreezer`, `countExpiryWarnings`, `isInStock`, `cleanFreezerInput`, `create/update/deleteFreezerItem`, `adjustPortions`). "Soon" uses calendar months via `subMonths`, so for an expiry on 31 Mar the warning starts on 28 Feb. The expiry day itself counts as soon, and the day after counts as expired.
+- UI: `src/views/FreezerView.tsx`, `src/components/FreezerItemForm.tsx`. `TabBar` takes a `badges` prop with screen-reader text. `src/hooks/useToday.ts` rolls the date over at midnight, so the badge and chips don't go stale in a PWA that stays open.
+- Form: an optional "Library meal" select (shown only when the library has meals) fills in the name. Frozen date defaults to today. The expiry date is required and can't be before the frozen date. Portions are a whole number, 0 or more.
+- Beyond the spec: Delete (with a confirm step) on the edit screen. The labels "Expires today" and "Expires tomorrow". Items with the same expiry date are sorted by name.
+- Tests: `freezer.test.ts` covers the boundaries (1 month before, the day before that, the expiry day, the day after, the end-of-month clamp and DST). `FreezerView.test.tsx` covers the form, list, +/−, used up and the tab badge, and `useToday.test.ts` covers the rollover.
+- Review follow-ups not done: `DeleteButton` duplicates the delete-confirm in `MealDetail` and could become a shared `ConfirmDelete` component. Form validation mirrors `cleanFreezerInput`, the same pattern as `MealForm`.
