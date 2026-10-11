@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { addDaysISO, compareISO, diffDaysISO, fromISODate, isISODate, toISODate, todayISO } from './dates'
+import {
+  addDaysISO,
+  addMonthsISO,
+  compareISO,
+  diffDaysISO,
+  formatDayLong,
+  formatMonth,
+  formatRange,
+  fromISODate,
+  isISODate,
+  isSameYearISO,
+  monthWeeks,
+  startOfMonthISO,
+  toISODate,
+  todayISO,
+} from './dates'
 
 describe('test environment', () => {
   it('runs in a non-UTC time zone so off-by-one bugs would show', () => {
@@ -72,5 +87,70 @@ describe('compareISO', () => {
     expect(compareISO('2026-01-02', '2026-01-10')).toBeLessThan(0)
     expect(compareISO('2026-01-10', '2026-01-10')).toBe(0)
     expect(compareISO('2027-01-01', '2026-12-31')).toBeGreaterThan(0)
+  })
+})
+
+describe('startOfMonthISO / addMonthsISO', () => {
+  it('finds the first day of the month', () => {
+    expect(startOfMonthISO('2026-10-11')).toBe('2026-10-01')
+    expect(startOfMonthISO('2026-10-01')).toBe('2026-10-01')
+  })
+
+  it('steps months across years, far in both directions', () => {
+    expect(addMonthsISO('2026-12-01', 1)).toBe('2027-01-01')
+    expect(addMonthsISO('2026-01-01', -1)).toBe('2025-12-01')
+    expect(addMonthsISO('2026-10-01', 1200)).toBe('2126-10-01')
+    expect(addMonthsISO('2026-10-01', -1200)).toBe('1926-10-01')
+  })
+})
+
+describe('monthWeeks', () => {
+  it('lists Monday week starts covering the whole month', () => {
+    // October 2026 starts on a Thursday and ends on a Saturday.
+    expect(monthWeeks('2026-10-01')).toEqual(['2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26'])
+  })
+
+  it('starts on the 1st when the month begins on a Monday', () => {
+    // June 2026 starts on a Monday and ends on a Tuesday.
+    expect(monthWeeks('2026-06-01')).toEqual(['2026-06-01', '2026-06-08', '2026-06-15', '2026-06-22', '2026-06-29'])
+  })
+
+  it('covers six rows when needed', () => {
+    // August 2026 starts on a Saturday and ends on a Monday.
+    const weeks = monthWeeks('2026-08-01')
+    expect(weeks).toHaveLength(6)
+    expect(weeks[0]).toBe('2026-07-27')
+    expect(weeks[5]).toBe('2026-08-31')
+  })
+})
+
+describe('formatRange', () => {
+  it('formats a single day', () => {
+    expect(formatRange('2026-10-13', '2026-10-13')).toBe('Tue 13 Oct')
+  })
+
+  it('shares the month within one month', () => {
+    expect(formatRange('2026-10-13', '2026-10-15')).toBe('Tue 13 – Thu 15 Oct')
+  })
+
+  it('names both months across a month boundary', () => {
+    expect(formatRange('2026-10-30', '2026-11-02')).toBe('Fri 30 Oct – Mon 2 Nov')
+  })
+
+  it('adds the year when asked', () => {
+    expect(formatRange('2027-01-04', '2027-01-04', { year: true })).toBe('Mon 4 Jan 2027')
+    expect(formatRange('2026-12-31', '2027-01-01', { year: true })).toBe('Thu 31 Dec 2026 – Fri 1 Jan 2027')
+  })
+})
+
+describe('formatMonth / formatDayLong / isSameYearISO', () => {
+  it('formats month titles and full day names', () => {
+    expect(formatMonth('2026-10-01')).toBe('October 2026')
+    expect(formatDayLong('2026-10-11')).toBe('Sunday 11 October 2026')
+  })
+
+  it('compares years', () => {
+    expect(isSameYearISO('2026-01-01', '2026-12-31')).toBe(true)
+    expect(isSameYearISO('2026-12-31', '2027-01-01')).toBe(false)
   })
 })

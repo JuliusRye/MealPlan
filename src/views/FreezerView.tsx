@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
+import ConfirmDelete from '../components/ConfirmDelete'
 import FreezerItemForm from '../components/FreezerItemForm'
 import { db, type FreezerItem } from '../db'
 import { useToday } from '../hooks/useToday'
@@ -58,7 +59,8 @@ export default function FreezerView() {
           }}
           onCancel={toList}
         />
-        <DeleteButton
+        <ConfirmDelete
+          errorMessage="Could not delete the freezer item."
           onDelete={async () => {
             await deleteFreezerItem(current.id)
             toList()
@@ -136,47 +138,5 @@ function FreezerRow({ item, today, onEdit }: { item: FreezerItem; today: ISODate
         </button>
       </div>
     </li>
-  )
-}
-
-function DeleteButton({ onDelete }: { onDelete: () => Promise<void> }) {
-  const [confirming, setConfirming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [error, setError] = useState<string>()
-
-  async function handleDelete() {
-    setDeleting(true)
-    try {
-      await onDelete()
-    } catch {
-      setError('Could not delete the freezer item.')
-      setDeleting(false)
-    }
-  }
-
-  return (
-    <>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="actions">
-        {confirming ? (
-          <>
-            <button type="button" onClick={() => setConfirming(false)}>
-              Cancel
-            </button>
-            <button type="button" className="danger" disabled={deleting} onClick={handleDelete}>
-              Confirm delete
-            </button>
-          </>
-        ) : (
-          <button type="button" className="danger-outline" onClick={() => setConfirming(true)}>
-            Delete
-          </button>
-        )}
-      </div>
-    </>
   )
 }

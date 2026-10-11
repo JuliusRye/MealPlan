@@ -1,0 +1,257 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { db, type PlanEntry } from '../db'
+import {
+  cleanPlanInput,
+  createPlanEntry,
+  deletePlanEntry,
+  entriesInRange,
+  entryDays,
+  findOverlaps,
+  layoutWeekBars,
+  overlapWarning,
+  unplannedDays,
+  upcomingEntries,
+  updatePlanEntry,
+  type PlanInput,
+} from './plan'
+
+afterEach(async () => {
+  await db.plan.clear()
+})
+
+const entry = (id: string, startDate: string, endDate = startDate, extra: Partial<PlanEntry> = {}): PlanEntry => ({
+  id,
+  title: id,
+  startDate,
+  endDate,
+  ...extra,
+})
+
+const input = (extra: Partial<PlanInput> = {}): PlanInput => ({
+  title: 'Chili',
+  startDate: '2026-10-12',
+  endDate: '2026-10-14',
+  ...extra,
+})
+
+describe('cleanPlanInput', () => {
+  it('trims text and drops an empty note', () => {
+    expect(cleanPlanInput(input({ title: '  Chili ', note: '  ' }))).toEqual(input())
+    expect(cleanPlanInput(input({ note: ' Double batch ' })).note).toBe('Double batch')
+  })
+
+  it('keeps links to the library and freezer', () => {
+    const linked = input({ mealId: 'm1', freezerItemId: 'f1', portionsFromFreezer: 2 })
+    expect(cleanPlanInput(linked)).toEqual(linked)
+  })
+
+  it('requires a title', () => {
+    expect(() => cleanPlanInput(input({ title: ' ' }))).toThrow(/title/)
+  })
+
+  it('requires valid dates', () => {
+    expect(() => cleanPlanInput(input({ startDate: '' }))).toThrow(/start/)
+    expect(() => cleanPlanInput(input({ endDate: '2026-02-30' }))).toThrow(/end/)
+  })
+
+  it('rejects an end date before the start date but allows a single day', () => {
+    expect(() => cleanPlanInput(input({ startDate: '2026-10-12', endDate: '2026-10-11' }))).toThrow(/end/)
+    expect(cleanPlanInput(input({ startDate: '2026-10-12', endDate: '2026-10-12' })).endDate).toBe('2026-10-12')
+  })
+})
+
+describe('entryDays', () => {
+  it('counts the days an entry covers, inclusive', () => {
+    expect(entryDays(entry('a', '2026-10-12'))).toBe(1)
+    expect(entryDays(entry('a', '2026-10-30', '2026-11-02'))).toBe(4)
+    // Across the DST change on 25 Oct 2026.
+    expect(entryDays(entry('a', '2026-10-24', '2026-10-26'))).toBe(3)
+  })
+})
+
+describe('plan storage', () => {
+  it('creates, updates and deletes an entry', async () => {
+    const created = await createPlanEntry(input({ note: 'Spicy' }))
+    expect(await db.plan.get(created.id)).toEqual(created)
+
+    const updated = await updatePlanEntry(created.id, input({ title: 'Lasagna', endDate: '2026-10-12' }))
+    expect(updated).toEqual({ ...input({ title: 'Lasagna', endDate: '2026-10-12' }), id: created.id })
+    expect(await db.plan.get(created.id)).toEqual(updated)
+
+    await deletePlanEntry(created.id)
+    expect(await db.plan.count()).toBe(0)
+  })
+
+  it('does not store invalid input', async () => {
+    await expect(createPlanEntry(input({ endDate: '2026-10-01' }))).rejects.toThrow()
+    expect(await db.plan.count()).toBe(0)
+  })
+
+  it('fails to update a missing entry', async () => {
+    await expect(updatePlanEntry('nope', input())).rejects.toThrow(/not found/)
+    expect(await db.plan.count()).toBe(0)
+  })
+})
+
+describe('entriesInRange', () => {
+  it('returns entries where start <= to and end >= from, sorted by start', async () => {
+    await db.plan.bulkAdd([
+      entry('before', '2026-10-01', '2026-10-04'),
+      entry('touches-start', '2026-10-03', '2026-10-05'),
+      entry('inside', '2026-10-07'),
+      entry('covers', '2026-09-20', '2026-11-20'),
+      entry('touches-end', '2026-10-11', '2026-10-15'),
+      entry('after', '2026-10-12', '2026-10-13'),
+    ])
+    const found = await entriesInRange('2026-10-05', '2026-10-11')
+    expect(found.map((e) => e.id)).toEqual(['covers', 'touches-start', 'inside', 'touches-end'])
+  })
+
+  it('finds entries far in the past and future', async () => {
+    await db.plan.bulkAdd([entry('old', '1999-12-31', '2000-01-02'), entry('future', '2099-06-01')])
+    expect((await entriesInRange('2000-01-01', '2000-01-31')).map((e) => e.id)).toEqual(['old'])
+    expect((await entriesInRange('2099-06-01', '2099-06-01')).map((e) => e.id)).toEqual(['future'])
+  })
+})
+
+describe('upcomingEntries', () => {
+  it('returns entries that have not ended yet, in date order', async () => {
+    await db.plan.bulkAdd([
+      entry('later', '2027-03-01'),
+      entry('past', '2026-10-01', '2026-10-10'),
+      entry('ongoing', '2026-10-10', '2026-10-11'),
+      entry('next', '2026-10-12'),
+    ])
+    expect((await upcomingEntries('2026-10-11')).map((e) => e.id)).toEqual(['ongoing', 'next', 'later'])
+  })
+})
+
+describe('findOverlaps', () => {
+  const others = [
+    entry('chili', '2026-10-12', '2026-10-14'),
+    entry('soup', '2026-10-16'),
+    entry('pie', '2026-10-08', '2026-10-10'),
+  ]
+
+  it('finds entries sharing at least one day, in date order', () => {
+    expect(findOverlaps({ startDate: '2026-10-10', endDate: '2026-10-16' }, others).map((e) => e.id)).toEqual([
+      'pie',
+      'chili',
+      'soup',
+    ])
+    expect(findOverlaps({ startDate: '2026-10-14', endDate: '2026-10-14' }, others).map((e) => e.id)).toEqual(['chili'])
+  })
+
+  it('ignores entries that only touch the edges', () => {
+    expect(findOverlaps({ startDate: '2026-10-15', endDate: '2026-10-15' }, others)).toEqual([])
+    expect(findOverlaps({ startDate: '2026-10-11', endDate: '2026-10-11' }, others)).toEqual([])
+  })
+
+  it('ignores the entry being edited', () => {
+    expect(findOverlaps({ id: 'chili', startDate: '2026-10-12', endDate: '2026-10-13' }, others)).toEqual([])
+  })
+})
+
+describe('overlapWarning', () => {
+  it('names the clashing day and dinner', () => {
+    expect(overlapWarning({ startDate: '2026-10-11', endDate: '2026-10-13' }, entry('Chili', '2026-10-13', '2026-10-15'))).toBe(
+      'Tue 13 Oct already has Chili',
+    )
+  })
+
+  it('names the clashing days when several overlap', () => {
+    expect(overlapWarning({ startDate: '2026-10-12', endDate: '2026-10-20' }, entry('Chili', '2026-10-10', '2026-10-14'))).toBe(
+      'Mon 12 – Wed 14 Oct already have Chili',
+    )
+  })
+})
+
+describe('layoutWeekBars', () => {
+  const week = '2026-10-12' // Monday
+
+  it('places an entry inside the week at its column and span', () => {
+    const [bar] = layoutWeekBars(week, [entry('a', '2026-10-13', '2026-10-15')])
+    expect(bar).toMatchObject({ column: 1, span: 3, lane: 0, continuesBefore: false, continuesAfter: false })
+  })
+
+  it('clips an entry that started in the previous week', () => {
+    const [bar] = layoutWeekBars(week, [entry('a', '2026-10-10', '2026-10-13')])
+    expect(bar).toMatchObject({ column: 0, span: 2, continuesBefore: true, continuesAfter: false })
+  })
+
+  it('clips an entry that continues into the next week', () => {
+    const [bar] = layoutWeekBars(week, [entry('a', '2026-10-17', '2026-10-20')])
+    expect(bar).toMatchObject({ column: 5, span: 2, continuesBefore: false, continuesAfter: true })
+  })
+
+  it('spans the whole week for an entry covering it', () => {
+    const [bar] = layoutWeekBars(week, [entry('a', '2026-10-01', '2026-10-31')])
+    expect(bar).toMatchObject({ column: 0, span: 7, continuesBefore: true, continuesAfter: true })
+  })
+
+  it('splits an entry crossing week and month boundaries into one bar per week row', () => {
+    // Fri 30 Oct – Tue 3 Nov 2026 crosses both the week and the month boundary.
+    const e = entry('a', '2026-10-30', '2026-11-03')
+    expect(layoutWeekBars('2026-10-26', [e])).toEqual([
+      { entry: e, column: 4, span: 3, lane: 0, continuesBefore: false, continuesAfter: true },
+    ])
+    expect(layoutWeekBars('2026-11-02', [e])).toEqual([
+      { entry: e, column: 0, span: 2, lane: 0, continuesBefore: true, continuesAfter: false },
+    ])
+  })
+
+  it('handles the DST change inside the week', () => {
+    // DST ends on Sunday 25 Oct 2026.
+    const [bar] = layoutWeekBars('2026-10-19', [entry('a', '2026-10-24', '2026-10-26')])
+    expect(bar).toMatchObject({ column: 5, span: 2, continuesAfter: true })
+  })
+
+  it('leaves out entries outside the week', () => {
+    expect(layoutWeekBars(week, [entry('a', '2026-10-11'), entry('b', '2026-10-19')])).toEqual([])
+  })
+
+  it('puts entries that do not overlap in the same lane', () => {
+    const bars = layoutWeekBars(week, [entry('b', '2026-10-15', '2026-10-18'), entry('a', '2026-10-12', '2026-10-14')])
+    expect(bars.map((b) => [b.entry.id, b.lane])).toEqual([
+      ['a', 0],
+      ['b', 0],
+    ])
+  })
+
+  it('stacks overlapping entries in separate lanes and reuses freed lanes', () => {
+    const bars = layoutWeekBars(week, [
+      entry('long', '2026-10-12', '2026-10-18'),
+      entry('mid', '2026-10-13', '2026-10-14'),
+      entry('late', '2026-10-16'),
+      entry('clash', '2026-10-14', '2026-10-16'),
+    ])
+    expect(Object.fromEntries(bars.map((b) => [b.entry.id, b.lane]))).toEqual({ long: 0, mid: 1, clash: 2, late: 1 })
+  })
+
+  it('puts the longer entry first when two start on the same day', () => {
+    const bars = layoutWeekBars(week, [entry('short', '2026-10-13'), entry('long', '2026-10-13', '2026-10-15')])
+    expect(bars.map((b) => [b.entry.id, b.lane])).toEqual([
+      ['long', 0],
+      ['short', 1],
+    ])
+  })
+})
+
+describe('unplannedDays', () => {
+  it('lists the days in the next week without a dinner, starting today', () => {
+    const entries = [entry('a', '2026-10-09', '2026-10-12'), entry('b', '2026-10-14', '2026-10-15'), entry('c', '2026-10-17', '2026-10-30')]
+    expect(unplannedDays('2026-10-11', entries)).toEqual(['2026-10-13', '2026-10-16'])
+  })
+
+  it('lists all 7 days when nothing is planned', () => {
+    expect(unplannedDays('2026-10-11', [])).toEqual([
+      '2026-10-11',
+      '2026-10-12',
+      '2026-10-13',
+      '2026-10-14',
+      '2026-10-15',
+      '2026-10-16',
+      '2026-10-17',
+    ])
+  })
+})
