@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Meal } from '../db'
 import { safeHref } from '../logic/meals'
+import MealGallery from './MealGallery'
 import MealMeta from './MealMeta'
 
 interface Props {
@@ -68,6 +69,8 @@ export default function MealDetail({ meal, onBack, onEdit, onDelete }: Props) {
           </>
         )}
       </dl>
+
+      <MealGallery mealId={meal.id} />
 
       {error && (
         <p className="form-error" role="alert">

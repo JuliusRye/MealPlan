@@ -9,6 +9,7 @@ import {
   searchMeals,
   updateMeal,
 } from './meals'
+import { addMealImages, getMealImages } from './images'
 
 afterEach(async () => {
   await Promise.all(db.tables.map((t) => t.clear()))
@@ -70,6 +71,22 @@ describe('createMeal / updateMeal / deleteMeal', () => {
     expect(await db.meals.get(meal.id)).toBeUndefined()
     expect(await db.mealImages.where('mealId').equals(meal.id).count()).toBe(0)
     expect(await db.mealImages.where('mealId').equals(other.id).count()).toBe(1)
+  })
+  it('keeps the images when deleting the meal fails (one transaction)', async () => {
+    const meal = await createMeal({ name: 'Soup' })
+    await addMealImages(meal.id, [{ blob: new Blob(['x']), kind: 'result' }])
+    const failMealDelete = () => {
+      throw new Error('disk full')
+    }
+    db.meals.hook('deleting', failMealDelete)
+    try {
+      await expect(deleteMeal(meal.id)).rejects.toThrow('disk full')
+    } finally {
+      db.meals.hook('deleting').unsubscribe(failMealDelete)
+    }
+
+    expect(await db.meals.get(meal.id)).toBeDefined()
+    expect(await getMealImages(meal.id)).toHaveLength(1)
   })
 })
 

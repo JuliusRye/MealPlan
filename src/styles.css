@@ -225,11 +225,37 @@ textarea:focus-visible {
 .meal-row {
   width: 100%;
   display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 8px 8px;
+  text-align: left;
+}
+
+.meal-row-text {
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  padding: 10px 16px;
-  text-align: left;
+  min-width: 0;
+}
+
+.meal-thumb {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--accent-soft);
+  font-size: 1.5rem;
+}
+
+.meal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .meal-name {
@@ -376,4 +402,145 @@ textarea:focus-visible {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.segmented-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.gallery {
+  margin-bottom: 24px;
+}
+
+.gallery h2 {
+  margin: 0 0 8px;
+  font-size: 1.125rem;
+}
+
+.gallery-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.gallery-item {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.gallery-thumb {
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.gallery-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gallery-controls {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gallery-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gallery-buttons .push-right {
+  margin-left: auto;
+}
+
+.gallery-add {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+/* A <label> wrapping a hidden file input, styled like a button. */
+.file-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 12px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.file-button input {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.file-button:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.file-button[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: #000000;
+  color: #ffffff;
+}
+
+.photo-viewer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(env(safe-area-inset-top) + 8px) 12px 8px 16px;
+}
+
+.photo-viewer-bar button {
+  background: rgb(255 255 255 / 0.12);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.photo-viewer-stage {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.photo-viewer-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: 0 0;
+  will-change: transform;
 }

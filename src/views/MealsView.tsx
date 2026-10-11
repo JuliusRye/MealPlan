@@ -3,7 +3,9 @@ import { useState } from 'react'
 import MealDetail from '../components/MealDetail'
 import MealForm from '../components/MealForm'
 import MealMeta from '../components/MealMeta'
+import MealThumb from '../components/MealThumb'
 import { db } from '../db'
+import { pickThumbnails } from '../logic/images'
 import { createMeal, deleteMeal, searchMeals, updateMeal } from '../logic/meals'
 
 type Screen =
@@ -14,6 +16,7 @@ type Screen =
 
 export default function MealsView() {
   const meals = useLiveQuery(() => db.meals.toArray())
+  const thumbnails = useLiveQuery(async () => pickThumbnails(await db.mealImages.toArray()))
   const [screen, setScreen] = useState<Screen>({ kind: 'list' })
   const [query, setQuery] = useState('')
   const toList = () => setScreen({ kind: 'list' })
@@ -99,8 +102,11 @@ export default function MealsView() {
                     className="meal-row"
                     onClick={() => setScreen({ kind: 'detail', id: meal.id })}
                   >
-                    <span className="meal-name">{meal.name}</span>
-                    <MealMeta meal={meal} />
+                    <MealThumb image={thumbnails?.get(meal.id)} />
+                    <span className="meal-row-text">
+                      <span className="meal-name">{meal.name}</span>
+                      <MealMeta meal={meal} />
+                    </span>
                   </button>
                 </li>
               ))}

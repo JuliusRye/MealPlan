@@ -1,12 +1,46 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '../db'
+import { addMealImages, getMealImages } from '../logic/images'
 import { createMeal } from '../logic/meals'
+import { resizeImage } from '../logic/resizeImage'
 import MealsView from './MealsView'
 
+// The canvas resize needs a real browser; stand in for it at that boundary.
+vi.mock('../logic/resizeImage', () => ({
+  resizeImage: vi.fn(async (file: Blob) => new Blob([`resized ${await file.text()}`], { type: 'image/jpeg' })),
+}))
+
+// jsdom has no object URLs. Track which blob each URL points to and which were revoked.
+const objectUrls = new Map<string, Blob>()
+const revoked = new Set<string>()
+const { createObjectURL, revokeObjectURL } = URL
+beforeEach(() => {
+  objectUrls.clear()
+  revoked.clear()
+  URL.createObjectURL = (blob: Blob) => {
+    const url = `blob:test/${objectUrls.size}`
+    objectUrls.set(url, blob)
+    return url
+  }
+  URL.revokeObjectURL = (url: string) => {
+    revoked.add(url)
+  }
+})
+
+afterAll(() => {
+  Object.assign(URL, { createObjectURL, revokeObjectURL })
+})
+
 afterEach(async () => {
+  vi.clearAllMocks()
   await Promise.all(db.tables.map((t) => t.clear()))
 })
+
+/** The text of the blob an <img> shows. */
+const shownBlob = (img: HTMLElement) => objectUrls.get(img.getAttribute('src') ?? '')?.text()
+
+const photo = (name: string) => new File([name], `${name}.jpg`, { type: 'image/jpeg' })
 
 const type = (label: string | RegExp, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
@@ -148,5 +182,138 @@ describe('MealsView', () => {
 
     render(<MealsView />)
     expect(await screen.findByRole('button', { name: /soup/i })).toBeInTheDocument()
+  })
+
+  describe('photos', () => {
+    async function openMeal(name = 'Lasagna') {
+      const meal = await createMeal({ name })
+      render(<MealsView />)
+      fireEvent.click(await screen.findByRole('button', { name: new RegExp(name, 'i') }))
+      await screen.findByRole('heading', { name })
+      return meal
+    }
+
+    const choose = (label: RegExp, files: File[]) =>
+      fireEvent.change(screen.getByLabelText(label), { target: { files } })
+
+    it('adds resized photos as recipe pages or finished dishes', async () => {
+      const meal = await openMeal()
+      choose(/add recipe page/i, [photo('page 1'), photo('page 2')])
+      await waitFor(async () => expect(await getMealImages(meal.id)).toHaveLength(2))
+      choose(/add dish photo/i, [photo('dish')])
+      await waitFor(async () => expect(await getMealImages(meal.id)).toHaveLength(3))
+
+      expect(resizeImage).toHaveBeenCalledTimes(3)
+      const stored = await getMealImages(meal.id)
+      expect(stored.map((i) => i.kind)).toEqual(['recipe', 'recipe', 'result'])
+      expect(await Promise.all(stored.map((i) => i.blob.text()))).toEqual([
+        'resized page 1', 'resized page 2', 'resized dish',
+      ])
+
+      const shown = await waitFor(() => {
+        const imgs = screen.getAllByRole('img', { name: /photo \d/i })
+        expect(imgs).toHaveLength(3)
+        return imgs
+      })
+      expect(await Promise.all(shown.map(shownBlob))).toEqual(['resized page 1', 'resized page 2', 'resized dish'])
+    })
+
+    async function openMealWithPhotos(...texts: string[]) {
+      const meal = await createMeal({ name: 'Lasagna' })
+      await addMealImages(meal.id, texts.map((text) => ({ blob: new Blob([text]), kind: 'recipe' as const })))
+      render(<MealsView />)
+      fireEvent.click(await screen.findByRole('button', { name: /lasagna/i }))
+      await waitFor(() => expect(screen.getAllByRole('img', { name: /photo \d/i })).toHaveLength(texts.length))
+      return meal
+    }
+    const shownPhotos = () => Promise.all(screen.getAllByRole('img', { name: /photo \d/i }).map(shownBlob))
+
+    it('switches a photo between recipe page and finished dish', async () => {
+      const meal = await openMealWithPhotos('a', 'b')
+      const group = screen.getByRole('radiogroup', { name: /photo 2 of 2/i })
+      expect(within(group).getByRole('radio', { name: 'Recipe page' })).toBeChecked()
+
+      fireEvent.click(within(group).getByRole('radio', { name: 'Finished dish' }))
+      await waitFor(async () =>
+        expect((await getMealImages(meal.id)).map((i) => i.kind)).toEqual(['recipe', 'result']),
+      )
+      await waitFor(() => expect(within(group).getByRole('radio', { name: 'Finished dish' })).toBeChecked())
+    })
+
+    it('reorders and removes photos', async () => {
+      await openMealWithPhotos('a', 'b', 'c')
+      expect(screen.getByRole('button', { name: /move photo 1 of 3 earlier/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /move photo 3 of 3 later/i })).toBeDisabled()
+
+      fireEvent.click(screen.getByRole('button', { name: /move photo 3 of 3 earlier/i }))
+      await waitFor(async () => expect(await shownPhotos()).toEqual(['a', 'c', 'b']))
+      fireEvent.click(screen.getByRole('button', { name: /move photo 1 of 3 later/i }))
+      await waitFor(async () => expect(await shownPhotos()).toEqual(['c', 'a', 'b']))
+
+      fireEvent.click(screen.getByRole('button', { name: /remove photo 2 of 3/i }))
+      expect(await shownPhotos()).toEqual(['c', 'a', 'b'])
+      fireEvent.click(screen.getByRole('button', { name: /cancel removing photo 2 of 3/i }))
+      fireEvent.click(screen.getByRole('button', { name: /remove photo 2 of 3/i }))
+      fireEvent.click(screen.getByRole('button', { name: /confirm removing photo 2 of 3/i }))
+      await waitFor(async () => expect(await shownPhotos()).toEqual(['c', 'b']))
+    })
+
+    it('opens a photo full screen and closes it again', async () => {
+      await openMealWithPhotos('a', 'b')
+      fireEvent.click(screen.getByRole('button', { name: /view photo 2 of 2 full screen/i }))
+
+      const viewer = screen.getByRole('dialog', { name: /photo 2 of 2/i })
+      expect(await shownBlob(within(viewer).getByRole('img'))).toBe('b')
+      fireEvent.click(within(viewer).getByRole('button', { name: /close/i }))
+      expect(screen.queryByRole('dialog')).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: /view photo 1 of 2 full screen/i }))
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    it('adds the readable photos and reports the ones that could not be read', async () => {
+      vi.mocked(resizeImage).mockRejectedValueOnce(new Error('not an image'))
+      const meal = await openMeal()
+      choose(/add dish photo/i, [photo('broken'), photo('dish')])
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/one photo could not be read/i)
+      expect((await getMealImages(meal.id)).map((i) => i.kind)).toEqual(['result'])
+    })
+
+    it('revokes every object URL it created when unmounted', async () => {
+      await openMealWithPhotos('a', 'b')
+      fireEvent.click(screen.getByRole('button', { name: /view photo 1 of 2 full screen/i }))
+      await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('img')).toBeInTheDocument())
+      // Two gallery photos and the full-screen one (the list thumbnail is already gone).
+      expect([...objectUrls.keys()].filter((url) => !revoked.has(url))).toHaveLength(3)
+
+      cleanup()
+      expect(revoked).toEqual(new Set(objectUrls.keys()))
+    })
+
+    it('shows a list thumbnail: the first finished dish, otherwise the first photo', async () => {
+      const lasagna = await createMeal({ name: 'Lasagna' })
+      const chili = await createMeal({ name: 'Chili' })
+      await createMeal({ name: 'Toast' })
+      await addMealImages(lasagna.id, [
+        { blob: new Blob(['lasagna page']), kind: 'recipe' },
+        { blob: new Blob(['lasagna dish']), kind: 'result' },
+        { blob: new Blob(['lasagna dish 2']), kind: 'result' },
+      ])
+      await addMealImages(chili.id, [
+        { blob: new Blob(['chili page']), kind: 'recipe' },
+        { blob: new Blob(['chili page 2']), kind: 'recipe' },
+      ])
+      render(<MealsView />)
+
+      const thumb = async (name: RegExp) => {
+        const row = await screen.findByRole('button', { name })
+        return waitFor(() => row.querySelector('img') ?? Promise.reject(new Error('no thumbnail yet')))
+      }
+      expect(await shownBlob(await thumb(/lasagna/i))).toBe('lasagna dish')
+      expect(await shownBlob(await thumb(/chili/i))).toBe('chili page')
+      expect(screen.getByRole('button', { name: /toast/i }).querySelector('img')).toBeNull()
+    })
   })
 })
