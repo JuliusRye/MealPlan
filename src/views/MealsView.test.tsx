@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { db } from '../db'
 import { addMealImages, getMealImages } from '../logic/images'
 import { createMeal } from '../logic/meals'
+import { createPlanEntry } from '../logic/plan'
 import { resizeImage } from '../logic/resizeImage'
 import MealsView from './MealsView'
 
@@ -315,5 +316,61 @@ describe('MealsView', () => {
       expect(await shownBlob(await thumb(/chili/i))).toBe('chili page')
       expect(screen.getByRole('button', { name: /toast/i }).querySelector('img')).toBeNull()
     })
+  })
+})
+
+describe('MealsView planning', () => {
+  // Today is Sunday 11 October 2026; only the clock is faked.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 11, 12, 0))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const openMeal = async (name: string) => {
+    render(<MealsView />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(name) }))
+  }
+
+  it('shows when the meal was last and next planned and how often', async () => {
+    const chili = await createMeal({ name: 'Chili' })
+    const other = await createMeal({ name: 'Stew' })
+    await createPlanEntry({ title: 'Chili', startDate: '2026-09-02', endDate: '2026-09-03', mealId: chili.id })
+    await createPlanEntry({ title: 'Chili', startDate: '2026-10-05', endDate: '2026-10-05', mealId: chili.id })
+    await createPlanEntry({ title: 'Chili', startDate: '2026-10-20', endDate: '2026-10-21', mealId: chili.id })
+    await createPlanEntry({ title: 'Stew', startDate: '2026-10-09', endDate: '2026-10-09', mealId: other.id })
+    await openMeal('Chili')
+
+    const details = (term: string) => screen.getByText(term).nextElementSibling
+    await waitFor(() => expect(details('Times planned')).toHaveTextContent('3'))
+    expect(details('Last planned')).toHaveTextContent('Monday 5 October 2026')
+    expect(details('Next planned')).toHaveTextContent('Tuesday 20 October 2026')
+  })
+
+  it('says when a meal has never been planned', async () => {
+    await createMeal({ name: 'Chili' })
+    await openMeal('Chili')
+    expect(await screen.findByText('Not planned yet')).toBeInTheDocument()
+    expect(screen.queryByText('Last planned')).toBeNull()
+  })
+
+  it('"Plan this" opens the Plan dinner sheet prefilled with the meal, starting today', async () => {
+    const chili = await createMeal({ name: 'Chili' })
+    await openMeal('Chili')
+    fireEvent.click(await screen.findByRole('button', { name: 'Plan this' }))
+    const dialog = screen.getByRole('dialog', { name: 'Plan dinner' })
+    expect(within(dialog).getByLabelText(/title/i)).toHaveValue('Chili')
+    expect(within(dialog).getByLabelText(/start date/i)).toHaveValue('2026-10-11')
+    expect(await within(dialog).findByText(/linked to your meal library/i)).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(await db.plan.toArray()).toMatchObject([
+      { title: 'Chili', mealId: chili.id, startDate: '2026-10-11', endDate: '2026-10-12' },
+    ])
+    expect(screen.getByText('Times planned').nextElementSibling).toHaveTextContent('1')
   })
 })

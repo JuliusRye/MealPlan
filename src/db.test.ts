@@ -5,16 +5,16 @@ afterEach(async () => {
   await Promise.all(db.tables.map((t) => t.clear()))
 })
 
-describe('db schema v1', () => {
+describe('db schema', () => {
   it('defines the four tables with their indexes', () => {
-    expect(db.verno).toBe(1)
+    expect(db.verno).toBe(2)
     const schema = Object.fromEntries(
       db.tables.map((t) => [t.name, [t.schema.primKey.name, ...t.schema.indexes.map((i) => i.name)]]),
     )
     expect(schema).toEqual({
       meals: ['id', 'name'],
       mealImages: ['id', 'mealId'],
-      plan: ['id', 'startDate', 'endDate'],
+      plan: ['id', 'startDate', 'endDate', 'mealId'],
       freezer: ['id', 'expiryDate'],
     })
   })

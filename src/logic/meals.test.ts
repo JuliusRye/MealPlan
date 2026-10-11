@@ -4,6 +4,7 @@ import {
   cleanMealInput,
   createMeal,
   deleteMeal,
+  findMealByName,
   formatMinutes,
   safeHref,
   searchMeals,
@@ -72,6 +73,20 @@ describe('createMeal / updateMeal / deleteMeal', () => {
     expect(await db.mealImages.where('mealId').equals(meal.id).count()).toBe(0)
     expect(await db.mealImages.where('mealId').equals(other.id).count()).toBe(1)
   })
+
+  it('unlinks plan entries from a deleted meal but keeps their title', async () => {
+    const meal = await createMeal({ name: 'Soup' })
+    const other = await createMeal({ name: 'Stew' })
+    await db.plan.bulkAdd([
+      { id: 'p1', title: 'Soup', startDate: '2026-10-01', endDate: '2026-10-02', mealId: meal.id },
+      { id: 'p2', title: 'Stew', startDate: '2026-10-03', endDate: '2026-10-03', mealId: other.id },
+    ])
+
+    await deleteMeal(meal.id)
+
+    expect(await db.plan.get('p1')).toEqual({ id: 'p1', title: 'Soup', startDate: '2026-10-01', endDate: '2026-10-02' })
+    expect((await db.plan.get('p2'))?.mealId).toBe(other.id)
+  })
   it('keeps the images when deleting the meal fails (one transaction)', async () => {
     const meal = await createMeal({ name: 'Soup' })
     await addMealImages(meal.id, [{ blob: new Blob(['x']), kind: 'result' }])
@@ -104,6 +119,20 @@ describe('searchMeals', () => {
     expect(searchMeals(meals, '  PASTA ').map((m) => m.name)).toEqual(['Pasta Carbonara', 'pasta pesto'])
     expect(searchMeals(meals, 'sag').map((m) => m.name)).toEqual(['Lasagna'])
     expect(searchMeals(meals, 'xyz')).toEqual([])
+  })
+})
+
+describe('findMealByName', () => {
+  const meal = (name: string): Meal => ({ id: name, name, createdAt: 0, updatedAt: 0 })
+  const meals = [meal('Chili'), meal('Chili con carne')]
+
+  it('finds the meal with exactly that name, ignoring case and surrounding spaces', () => {
+    expect(findMealByName(meals, ' chili ')?.id).toBe('Chili')
+  })
+
+  it('ignores partial matches and empty names', () => {
+    expect(findMealByName(meals, 'Chil')).toBeUndefined()
+    expect(findMealByName(meals, ' ')).toBeUndefined()
   })
 })
 

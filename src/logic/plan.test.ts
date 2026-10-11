@@ -8,7 +8,10 @@ import {
   entryDays,
   findOverlaps,
   layoutWeekBars,
+  mealPlanStats,
   overlapWarning,
+  planEntriesForMeal,
+  savePlanEntry,
   unplannedDays,
   upcomingEntries,
   updatePlanEntry,
@@ -16,7 +19,7 @@ import {
 } from './plan'
 
 afterEach(async () => {
-  await db.plan.clear()
+  await Promise.all(db.tables.map((t) => t.clear()))
 })
 
 const entry = (id: string, startDate: string, endDate = startDate, extra: Partial<PlanEntry> = {}): PlanEntry => ({
@@ -253,5 +256,85 @@ describe('unplannedDays', () => {
       '2026-10-16',
       '2026-10-17',
     ])
+  })
+})
+
+describe('savePlanEntry', () => {
+  it('creates or updates an entry, keeping a picked library meal link', async () => {
+    const created = await savePlanEntry(input({ mealId: 'm1' }))
+    expect(await db.plan.get(created.id)).toEqual({ ...input({ mealId: 'm1' }), id: created.id })
+    await savePlanEntry(input({ title: 'Stew' }), { id: created.id })
+    expect(await db.plan.get(created.id)).toEqual({ ...input({ title: 'Stew' }), id: created.id })
+    expect(await db.meals.count()).toBe(0)
+  })
+
+  it('saves a free-text title to the library and links the entry to the new meal', async () => {
+    const entry = await savePlanEntry(input({ title: ' Fish pie ' }), { saveToLibrary: true })
+    const meals = await db.meals.toArray()
+    expect(meals).toHaveLength(1)
+    expect(meals[0].name).toBe('Fish pie')
+    expect(entry.mealId).toBe(meals[0].id)
+    expect((await db.plan.get(entry.id))?.mealId).toBe(meals[0].id)
+  })
+
+  it('links an edited entry to a new library meal', async () => {
+    const existing = await createPlanEntry(input())
+    const entry = await savePlanEntry(input(), { id: existing.id, saveToLibrary: true })
+    expect(entry.id).toBe(existing.id)
+    expect(entry.mealId).toBe((await db.meals.toArray())[0].id)
+  })
+
+  it('does not create a meal for an entry already linked to one', async () => {
+    const entry = await savePlanEntry(input({ mealId: 'm1' }), { saveToLibrary: true })
+    expect(entry.mealId).toBe('m1')
+    expect(await db.meals.count()).toBe(0)
+  })
+
+  it('creates neither the meal nor the entry when the input is invalid', async () => {
+    await expect(savePlanEntry(input({ title: ' ' }), { saveToLibrary: true })).rejects.toThrow(/title/)
+    await expect(savePlanEntry(input(), { id: 'missing', saveToLibrary: true })).rejects.toThrow(/not found/)
+    expect(await db.meals.count()).toBe(0)
+    expect(await db.plan.count()).toBe(0)
+  })
+})
+
+describe('planEntriesForMeal', () => {
+  it('returns only the entries linked to the meal', async () => {
+    const a = await createPlanEntry(input({ mealId: 'm1' }))
+    await createPlanEntry(input({ mealId: 'm2' }))
+    await createPlanEntry(input())
+    expect(await planEntriesForMeal('m1')).toEqual([a])
+  })
+})
+
+describe('mealPlanStats', () => {
+  const today = '2026-10-11'
+
+  it('reports nothing for a meal that was never planned', () => {
+    expect(mealPlanStats([], today)).toEqual({ timesPlanned: 0 })
+  })
+
+  it('counts every entry and finds the latest one started by today', () => {
+    const entries = [
+      entry('a', '2026-09-01', '2026-09-02'),
+      entry('b', '2026-10-05'),
+      entry('c', '2025-12-24'),
+    ]
+    expect(mealPlanStats(entries, today)).toEqual({ timesPlanned: 3, lastPlanned: '2026-10-05' })
+  })
+
+  it('counts an entry that started today or is ongoing as last planned', () => {
+    expect(mealPlanStats([entry('a', '2026-10-10', '2026-10-12')], today).lastPlanned).toBe('2026-10-10')
+    expect(mealPlanStats([entry('a', today)], today).lastPlanned).toBe(today)
+  })
+
+  it('reports the earliest future entry as next planned, not as last planned', () => {
+    const entries = [entry('a', '2026-11-01'), entry('b', '2026-10-20', '2026-10-21'), entry('c', '2026-10-01')]
+    expect(mealPlanStats(entries, today)).toEqual({
+      timesPlanned: 3,
+      lastPlanned: '2026-10-01',
+      nextPlanned: '2026-10-20',
+    })
+    expect(mealPlanStats([entry('a', '2026-10-12')], today)).toEqual({ timesPlanned: 1, nextPlanned: '2026-10-12' })
   })
 })

@@ -1,16 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useId, useState } from 'react'
-import type { PlanEntry } from '../db'
+import { db, type Meal, type PlanEntry } from '../db'
 import { addDaysISO, compareISO, isISODate, type ISODate } from '../logic/dates'
-import {
-  createPlanEntry,
-  deletePlanEntry,
-  entriesInRange,
-  entryDays,
-  findOverlaps,
-  overlapWarning,
-  updatePlanEntry,
-} from '../logic/plan'
+import { findMealByName, searchMeals } from '../logic/meals'
+import { deletePlanEntry, entriesInRange, entryDays, findOverlaps, overlapWarning, savePlanEntry } from '../logic/plan'
 import ConfirmDelete from './ConfirmDelete'
 
 interface Errors {
@@ -25,11 +18,15 @@ interface Props {
   entry?: PlanEntry
   /** Start date for a new dinner. */
   startDate?: ISODate
+  /** Library meal to plan as a new dinner. */
+  meal?: Meal
   onClose: () => void
 }
 
 /** New dinners usually cover a cook-once, eat-twice batch. */
 const DEFAULT_DAYS = 2
+/** Library matches shown under the title field. */
+const MAX_SUGGESTIONS = 5
 
 const parseDays = (value: string) => {
   const n = Number(value)
@@ -37,9 +34,11 @@ const parseDays = (value: string) => {
 }
 
 /** Bottom sheet to plan a dinner over one or more days, or edit/delete an existing one. */
-export default function PlanEntrySheet({ entry, startDate: initialStart, onClose }: Props) {
+export default function PlanEntrySheet({ entry, startDate: initialStart, meal, onClose }: Props) {
   const id = useId()
-  const [title, setTitle] = useState(entry?.title ?? '')
+  const [title, setTitle] = useState(entry?.title ?? meal?.name ?? '')
+  const [mealId, setMealId] = useState(entry?.mealId ?? meal?.id)
+  const [saveToLibrary, setSaveToLibrary] = useState(false)
   const [startDate, setStartDate] = useState(entry?.startDate ?? initialStart ?? '')
   const [endDate, setEndDate] = useState(
     entry?.endDate ?? (initialStart ? addDaysISO(initialStart, DEFAULT_DAYS - 1) : ''),
@@ -63,8 +62,30 @@ export default function PlanEntrySheet({ entry, startDate: initialStart, onClose
     [validRange, startDate, endDate, entry?.id],
   )
 
+  const meals = useLiveQuery(() => db.meals.toArray())
+  const linkedMeal = mealId ? meals?.find((m) => m.id === mealId) : undefined
+  const query = title.trim()
+  const matches = !linkedMeal && query && meals ? searchMeals(meals, query) : []
+  // A typed library name links to that meal on save, as if it had been picked.
+  const sameName = !linkedMeal && meals ? findMealByName(meals, title) : undefined
+  // Wait for the library to load so the checkbox doesn't flash for a linked entry.
+  const offerSave = !!meals && !linkedMeal && !!query && !sameName
+
   const clearError = (...keys: (keyof Errors)[]) =>
     setErrors((prev) => ({ ...prev, ...Object.fromEntries(keys.map((k) => [k, undefined])) }))
+
+  function changeTitle(value: string) {
+    setTitle(value)
+    // The title is the entry's own snapshot; editing it means a different dinner.
+    setMealId(undefined)
+    clearError('title')
+  }
+
+  function pickMeal(picked: Meal) {
+    setTitle(picked.name)
+    setMealId(picked.id)
+    clearError('title')
+  }
 
   function changeStart(value: string) {
     setStartDate(value)
@@ -100,12 +121,13 @@ export default function PlanEntrySheet({ entry, startDate: initialStart, onClose
     setErrors(found)
     if (Object.values(found).some(Boolean)) return
 
-    // Keep library/freezer links the sheet doesn't edit yet; cleanPlanInput drops the id.
-    const input = { ...entry, title, startDate, endDate, note }
+    // Keep freezer links the sheet doesn't edit yet; cleanPlanInput drops the id.
+    // Until the library loads, trust the link we were given.
+    const link = meals ? (linkedMeal ?? sameName)?.id : mealId
+    const input = { ...entry, title, startDate, endDate, note, mealId: link }
     setSaving(true)
     try {
-      if (entry) await updatePlanEntry(entry.id, input)
-      else await createPlanEntry(input)
+      await savePlanEntry(input, { id: entry?.id, saveToLibrary: offerSave && saveToLibrary })
       onClose()
     } catch {
       setErrors({ save: 'Could not save the dinner. Please try again.' })
@@ -139,15 +161,31 @@ export default function PlanEntrySheet({ entry, startDate: initialStart, onClose
             <input
               id={`${id}-title`}
               value={title}
-              onChange={(e) => {
-                setTitle(e.target.value)
-                clearError('title')
-              }}
+              onChange={(e) => changeTitle(e.target.value)}
+              placeholder="Search meals or type a dinner"
               autoComplete="off"
-              autoFocus={!entry}
+              autoFocus={!entry && !meal}
               {...invalidProps('title')}
             />
             {fieldError('title')}
+            {linkedMeal && <p className="field-hint">Linked to your meal library</p>}
+            {matches.length > 0 && (
+              <ul className="meal-suggestions" aria-label="Library meals">
+                {matches.slice(0, MAX_SUGGESTIONS).map((m) => (
+                  <li key={m.id}>
+                    <button type="button" onClick={() => pickMeal(m)}>
+                      {m.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {offerSave && (
+              <label className="checkbox">
+                <input type="checkbox" checked={saveToLibrary} onChange={(e) => setSaveToLibrary(e.target.checked)} />
+                Save to meal library
+              </label>
+            )}
           </div>
 
           <div className="field-row">

@@ -39,10 +39,16 @@ export async function updateMeal(id: string, input: MealInput, now = Date.now())
   })
 }
 
-/** Deletes the meal and its images in one transaction. */
+/** Deletes the meal and its images, and unlinks its plan entries (they keep their title), in one transaction. */
 export async function deleteMeal(id: string): Promise<void> {
-  await db.transaction('rw', db.meals, db.mealImages, async () => {
+  await db.transaction('rw', db.meals, db.mealImages, db.plan, async () => {
     await db.mealImages.where('mealId').equals(id).delete()
+    await db.plan
+      .where('mealId')
+      .equals(id)
+      .modify((entry) => {
+        delete entry.mealId
+      })
     await db.meals.delete(id)
   })
 }
@@ -53,6 +59,12 @@ export function searchMeals(meals: readonly Meal[], query: string): Meal[] {
   return meals
     .filter((m) => m.name.toLocaleLowerCase().includes(q))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+}
+
+/** The meal named `name` (ignoring case and surrounding spaces), if any. */
+export function findMealByName(meals: readonly Meal[], name: string): Meal | undefined {
+  const n = name.trim().toLocaleLowerCase()
+  return n ? meals.find((m) => m.name.toLocaleLowerCase() === n) : undefined
 }
 
 export function formatMinutes(minutes: number): string {

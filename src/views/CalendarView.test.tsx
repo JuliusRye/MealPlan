@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '../db'
+import { createMeal, deleteMeal } from '../logic/meals'
 import { createPlanEntry, type PlanInput } from '../logic/plan'
 import CalendarView from './CalendarView'
 
@@ -179,8 +180,8 @@ describe('Plan dinner sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.queryByRole('button', { name: /^Beef chili/ })).toBeNull()
     expect(await db.plan.count()).toBe(0)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Beef chili/ })).toBeNull())
   })
 
   it('opens the edit sheet when tapping anywhere on a planned day', async () => {
@@ -240,5 +241,107 @@ describe('Agenda list', () => {
     expect(screen.getByRole('button', { name: 'Agenda' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Month' }))
     expect(screen.getByTestId('month-grid')).toBeInTheDocument()
+  })
+})
+
+describe('Plan dinner sheet with the meal library', () => {
+  const openNew = () => fireEvent.click(day(/^Monday 19 October/))
+  const dialog = () => screen.getByRole('dialog')
+  const suggestions = () => within(dialog()).queryByRole('list', { name: 'Library meals' })
+
+  it('searches the library and links the entry to the picked meal', async () => {
+    const chili = await createMeal({ name: 'Chili con carne' })
+    await createMeal({ name: 'Lasagna' })
+    render(<CalendarView />)
+    openNew()
+    type(/title/i, 'chi')
+    const list = await within(dialog()).findByRole('list', { name: 'Library meals' })
+    expect(within(list).getAllByRole('button').map((b) => b.textContent)).toEqual(['Chili con carne'])
+
+    fireEvent.click(within(list).getByRole('button', { name: 'Chili con carne' }))
+    expect(within(dialog()).getByLabelText(/title/i)).toHaveValue('Chili con carne')
+    expect(within(dialog()).getByText(/linked to your meal library/i)).toBeInTheDocument()
+    expect(suggestions()).toBeNull()
+    expect(within(dialog()).queryByLabelText(/save to meal library/i)).toBeNull()
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const [entry] = await db.plan.toArray()
+    expect(entry).toMatchObject({ title: 'Chili con carne', mealId: chili.id, startDate: '2026-10-19' })
+  })
+
+  it('unlinks the meal when the title is edited afterwards', async () => {
+    await createMeal({ name: 'Chili' })
+    render(<CalendarView />)
+    openNew()
+    type(/title/i, 'Chi')
+    fireEvent.click(await within(dialog()).findByRole('button', { name: 'Chili' }))
+    type(/title/i, 'Chili with rice')
+    expect(within(dialog()).queryByText(/linked to your meal library/i)).toBeNull()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect((await db.plan.toArray())[0].mealId).toBeUndefined()
+  })
+
+  it('saves a free-text dinner to the library and links it', async () => {
+    render(<CalendarView />)
+    openNew()
+    type(/title/i, 'Fish pie')
+    fireEvent.click(await within(dialog()).findByLabelText(/save to meal library/i))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const meals = await db.meals.toArray()
+    expect(meals.map((m) => m.name)).toEqual(['Fish pie'])
+    expect((await db.plan.toArray())[0]).toMatchObject({ title: 'Fish pie', mealId: meals[0].id })
+  })
+
+  it('leaves free text unsaved to the library by default, and hides the option for a library name', async () => {
+    await createMeal({ name: 'Chili' })
+    render(<CalendarView />)
+    openNew()
+    expect(within(dialog()).queryByLabelText(/save to meal library/i)).toBeNull()
+    type(/title/i, 'chili')
+    await within(dialog()).findByRole('button', { name: 'Chili' })
+    expect(within(dialog()).queryByLabelText(/save to meal library/i)).toBeNull()
+    type(/title/i, 'Tacos')
+    expect(within(dialog()).getByLabelText(/save to meal library/i)).not.toBeChecked()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(await db.meals.count()).toBe(1)
+    expect((await db.plan.toArray())[0].mealId).toBeUndefined()
+  })
+
+  it('links a typed title that exactly matches a library meal', async () => {
+    const chili = await createMeal({ name: 'Chili' })
+    render(<CalendarView />)
+    openNew()
+    type(/title/i, 'chili ')
+    await within(dialog()).findByRole('button', { name: 'Chili' })
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect((await db.plan.toArray())[0]).toMatchObject({ title: 'chili', mealId: chili.id })
+  })
+
+  it('shows a linked entry as linked when editing, and keeps the link on save', async () => {
+    const chili = await createMeal({ name: 'Chili' })
+    await plan({ mealId: chili.id })
+    render(<CalendarView />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Chili, Tue 13 – Thu 15 Oct' }))
+    expect(await within(dialog()).findByText(/linked to your meal library/i)).toBeInTheDocument()
+    type(/note/i, 'Extra beans')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect((await db.plan.toArray())[0]).toMatchObject({ mealId: chili.id, note: 'Extra beans' })
+  })
+
+  it('keeps showing an entry after its library meal is deleted', async () => {
+    const chili = await createMeal({ name: 'Chili' })
+    await plan({ mealId: chili.id })
+    await deleteMeal(chili.id)
+    render(<CalendarView />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Chili, Tue 13 – Thu 15 Oct' }))
+    expect(within(dialog()).getByLabelText(/title/i)).toHaveValue('Chili')
+    expect(within(dialog()).queryByText(/linked to your meal library/i)).toBeNull()
+    expect(await within(dialog()).findByLabelText(/save to meal library/i)).toBeInTheDocument()
   })
 })

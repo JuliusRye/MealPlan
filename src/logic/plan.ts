@@ -1,11 +1,21 @@
 import { db, newId, type PlanEntry } from '../db'
 import { addDaysISO, compareISO, diffDaysISO, formatRange, isISODate, type ISODate } from './dates'
+import { createMeal } from './meals'
 
 /** The user-editable fields of a plan entry. */
 export type PlanInput = Omit<PlanEntry, 'id'>
 
 /** A date range, optionally the entry it belongs to (so it can ignore itself). */
 export type DateSpan = Pick<PlanEntry, 'startDate' | 'endDate'> & { id?: string }
+
+/** How often a library meal has been planned. */
+export interface MealPlanStats {
+  timesPlanned: number
+  /** Start of the latest entry that started on or before today. */
+  lastPlanned?: ISODate
+  /** Start of the earliest entry that starts after today. */
+  nextPlanned?: ISODate
+}
 
 /** One week row's piece of an entry in the month grid. */
 export interface WeekBar {
@@ -59,6 +69,22 @@ export async function updatePlanEntry(id: string, input: PlanInput): Promise<Pla
   })
 }
 
+/**
+ * Creates the entry, or updates entry `id`. With `saveToLibrary`, an entry not
+ * linked to a meal first gets a new library meal named after its title.
+ * All or nothing: a failed save leaves no new meal behind.
+ */
+export async function savePlanEntry(
+  input: PlanInput,
+  { id, saveToLibrary = false }: { id?: string; saveToLibrary?: boolean } = {},
+): Promise<PlanEntry> {
+  return db.transaction('rw', db.plan, db.meals, async () => {
+    let clean = cleanPlanInput(input)
+    if (saveToLibrary && !clean.mealId) clean = { ...clean, mealId: (await createMeal({ name: clean.title })).id }
+    return id ? updatePlanEntry(id, clean) : createPlanEntry(clean)
+  })
+}
+
 export async function deletePlanEntry(id: string): Promise<void> {
   await db.plan.delete(id)
 }
@@ -81,6 +107,24 @@ export async function entriesInRange(from: ISODate, to: ISODate): Promise<PlanEn
 export async function upcomingEntries(today: ISODate): Promise<PlanEntry[]> {
   const entries = await db.plan.where('endDate').aboveOrEqual(today).toArray()
   return entries.sort(byStart)
+}
+
+/** Entries linked to library meal `mealId`, in no particular order. */
+export async function planEntriesForMeal(mealId: string): Promise<PlanEntry[]> {
+  return db.plan.where('mealId').equals(mealId).toArray()
+}
+
+/** Stats over one meal's plan entries. Future entries count as planned but not as "last planned". */
+export function mealPlanStats(entries: readonly PlanEntry[], today: ISODate): MealPlanStats {
+  const stats: MealPlanStats = { timesPlanned: entries.length }
+  for (const { startDate } of entries) {
+    if (compareISO(startDate, today) <= 0) {
+      if (!stats.lastPlanned || compareISO(startDate, stats.lastPlanned) > 0) stats.lastPlanned = startDate
+    } else if (!stats.nextPlanned || compareISO(startDate, stats.nextPlanned) < 0) {
+      stats.nextPlanned = startDate
+    }
+  }
+  return stats
 }
 
 function sharesADay(a: DateSpan, b: DateSpan): boolean {

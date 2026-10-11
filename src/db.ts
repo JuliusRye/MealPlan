@@ -73,6 +73,11 @@ db.version(1).stores({
   freezer: 'id, expiryDate',
 })
 
+// Index plan entries by meal for "times planned" and unlinking deleted meals.
+db.version(2).stores({
+  plan: 'id, startDate, endDate, mealId',
+})
+
 export function newId(): string {
   return crypto.randomUUID()
 }
