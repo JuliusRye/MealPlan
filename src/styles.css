@@ -821,6 +821,20 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.freezer-marker {
+  margin-right: 3px;
+}
+
+.freezer-banner {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--chip-soon-bg);
+  color: var(--chip-soon-fg);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
 /* Square, edge-to-edge ends where an entry carries on into the next/previous week row. */
 .bar-continues-before {
   margin-left: 0;

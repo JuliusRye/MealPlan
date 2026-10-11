@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '../db'
+import { createFreezerItem, type FreezerInput } from '../logic/freezer'
 import { createMeal, deleteMeal } from '../logic/meals'
 import { createPlanEntry, type PlanInput } from '../logic/plan'
 import CalendarView from './CalendarView'
@@ -256,7 +257,11 @@ describe('Plan dinner sheet with the meal library', () => {
     openNew()
     type(/title/i, 'chi')
     const list = await within(dialog()).findByRole('list', { name: 'Library meals' })
-    expect(within(list).getAllByRole('button').map((b) => b.textContent)).toEqual(['Chili con carne'])
+    expect(
+      within(list)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Chili con carne'])
 
     fireEvent.click(within(list).getByRole('button', { name: 'Chili con carne' }))
     expect(within(dialog()).getByLabelText(/title/i)).toHaveValue('Chili con carne')
@@ -343,5 +348,174 @@ describe('Plan dinner sheet with the meal library', () => {
     expect(within(dialog()).getByLabelText(/title/i)).toHaveValue('Chili')
     expect(within(dialog()).queryByText(/linked to your meal library/i)).toBeNull()
     expect(await within(dialog()).findByLabelText(/save to meal library/i)).toBeInTheDocument()
+  })
+})
+
+describe('Plan dinner sheet with the freezer', () => {
+  const dialog = () => screen.getByRole('dialog')
+  const freeze = (extra: Partial<FreezerInput> = {}) =>
+    createFreezerItem({ name: 'Soup', portions: 3, frozenDate: '2026-09-01', expiryDate: '2027-03-01', ...extra })
+  const stock = async (id: string) => (await db.freezer.get(id))?.portions
+  const save = () => fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+  const closed = () => waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+  it('plans a dinner from the freezer and takes the portions out of stock', async () => {
+    const meal = await createMeal({ name: 'Soup' })
+    const soup = await freeze({ mealId: meal.id, expiryDate: '2026-10-20' })
+    await freeze({ name: 'Empty', portions: 0 })
+    render(<CalendarView />)
+    fireEvent.click(day(/^Monday 19 October/))
+    const picker = await within(dialog()).findByLabelText(/from the freezer/i)
+    const options = await within(picker).findAllByRole('option')
+    // Used-up items can't be picked.
+    expect(options.map((o) => o.textContent)).toEqual(['None', 'Soup · 3 portions · Expires in 9 days'])
+    fireEvent.change(picker, { target: { value: soup.id } })
+    expect(within(dialog()).getByLabelText(/title/i)).toHaveValue('Soup')
+    expect(await within(dialog()).findByText(/linked to your meal library/i)).toBeInTheDocument()
+    type(/portions/i, '2')
+    save()
+    await closed()
+    expect(await stock(soup.id)).toBe(1)
+    expect((await db.plan.toArray())[0]).toMatchObject({
+      title: 'Soup',
+      mealId: meal.id,
+      freezerItemId: soup.id,
+      portionsFromFreezer: 2,
+    })
+  })
+
+  it('does not let you take more portions than are in stock', async () => {
+    const soup = await freeze({ portions: 2 })
+    render(<CalendarView />)
+    fireEvent.click(day(/^Monday 19 October/))
+    const picker = await within(dialog()).findByLabelText(/from the freezer/i)
+    await within(picker).findByRole('option', { name: /Soup/ })
+    fireEvent.change(picker, { target: { value: soup.id } })
+    type(/portions/i, '3')
+    save()
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('Only 2 portions left in the freezer.')
+    expect(await stock(soup.id)).toBe(2)
+    expect(await db.plan.count()).toBe(0)
+  })
+
+  it('adjusts stock when editing the portions, and returns them all when switching away', async () => {
+    const soup = await freeze()
+    await plan({ title: 'Soup', freezerItemId: soup.id, portionsFromFreezer: 1 })
+    render(<CalendarView />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Soup, from the freezer, Tue 13/ }))
+    expect(await within(dialog()).findByLabelText(/from the freezer/i)).toHaveValue(soup.id)
+    // The portion this entry already holds counts as available.
+    expect(within(dialog()).getByText('Up to 3 portions')).toBeInTheDocument()
+    expect(within(dialog()).getByRole('option', { name: /^Soup/ })).toHaveTextContent('Soup · 3 portions')
+    type(/portions/i, '3')
+    save()
+    await closed()
+    expect(await stock(soup.id)).toBe(0)
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Soup, from the freezer, Tue 13/ }))
+    fireEvent.change(await within(dialog()).findByLabelText(/from the freezer/i), { target: { value: '' } })
+    expect(within(dialog()).queryByLabelText(/portions/i)).toBeNull()
+    save()
+    await closed()
+    expect(await stock(soup.id)).toBe(3)
+    expect((await db.plan.toArray())[0].freezerItemId).toBeUndefined()
+  })
+
+  it('returns the portions when the entry is deleted', async () => {
+    const soup = await freeze()
+    await plan({ title: 'Soup', freezerItemId: soup.id, portionsFromFreezer: 2 })
+    render(<CalendarView />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Soup, from the freezer, Tue 13/ }))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Delete' }))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Confirm delete' }))
+    await closed()
+    expect(await stock(soup.id)).toBe(3)
+  })
+
+  it('can unlink a dinner whose freezer item was deleted', async () => {
+    const soup = await freeze()
+    await plan({ title: 'Soup', freezerItemId: soup.id, portionsFromFreezer: 2 })
+    await db.freezer.delete(soup.id)
+    render(<CalendarView />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Soup, from the freezer, Tue 13/ }))
+    const picker = await within(dialog()).findByLabelText(/from the freezer/i)
+    expect(picker).toHaveDisplayValue('Soup (deleted from the freezer)')
+    fireEvent.change(picker, { target: { value: '' } })
+    save()
+    await closed()
+    expect((await db.plan.toArray())[0].freezerItemId).toBeUndefined()
+    expect(await db.freezer.count()).toBe(0)
+  })
+
+  it('marks freezer dinners with ❄ in the month grid and the agenda', async () => {
+    const soup = await freeze()
+    await plan({ title: 'Soup', freezerItemId: soup.id, portionsFromFreezer: 1 })
+    await plan({ title: 'Fresh', startDate: '2026-10-16', endDate: '2026-10-16' })
+    render(<CalendarView />)
+    expect(
+      await screen.findByRole('button', { name: 'Soup, from the freezer, Tue 13 – Thu 15 Oct' }),
+    ).toHaveTextContent('❄')
+    expect(screen.getByRole('button', { name: 'Fresh, Fri 16 Oct' })).not.toHaveTextContent('❄')
+    fireEvent.click(screen.getByRole('button', { name: 'Agenda' }))
+    const rows = within(await screen.findByRole('list', { name: 'Upcoming dinners' })).getAllByRole('button')
+    expect(rows[0]).toHaveTextContent('❄')
+    expect(rows[0]).toHaveAccessibleName(/from the freezer/i)
+    expect(rows[1]).not.toHaveTextContent('❄')
+  })
+
+  it('sends leftovers to the freezer, prefilled from the entry', async () => {
+    const meal = await createMeal({ name: 'Chili' })
+    await plan({ mealId: meal.id })
+    render(<CalendarView />)
+    expect(screen.queryByRole('button', { name: /leftovers/i })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: 'Chili, Tue 13 – Thu 15 Oct' }))
+    fireEvent.click(within(dialog()).getByRole('button', { name: /leftovers → freezer/i }))
+    const form = await screen.findByRole('dialog', { name: 'Add to freezer' })
+    expect(await within(form).findByLabelText(/library meal/i)).toHaveValue(meal.id)
+    expect(within(form).getByLabelText(/name/i)).toHaveValue('Chili')
+    expect(within(form).getByLabelText(/frozen on/i)).toHaveValue('2026-10-11')
+    fireEvent.change(within(form).getByLabelText(/portions/i), { target: { value: '2' } })
+    fireEvent.change(within(form).getByLabelText(/expiry date/i), { target: { value: '2027-01-11' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await closed()
+    expect(await db.freezer.toArray()).toEqual([
+      expect.objectContaining({
+        name: 'Chili',
+        mealId: meal.id,
+        portions: 2,
+        frozenDate: '2026-10-11',
+        expiryDate: '2027-01-11',
+      }),
+    ])
+  })
+
+  it('goes back to the dinner when cancelling the leftovers form', async () => {
+    await plan()
+    render(<CalendarView />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Chili, Tue 13 – Thu 15 Oct' }))
+    fireEvent.click(within(dialog()).getByRole('button', { name: /leftovers → freezer/i }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Add to freezer' })).getByRole('button', { name: 'Cancel' }),
+    )
+    expect(screen.getByRole('dialog', { name: 'Edit dinner' })).toBeInTheDocument()
+    expect(await db.freezer.count()).toBe(0)
+  })
+})
+
+describe('Calendar freezer banner', () => {
+  it('shows how many freezer items expire soon', async () => {
+    await createFreezerItem({ name: 'Soup', portions: 1, frozenDate: '2026-09-01', expiryDate: '2026-10-20' })
+    await createFreezerItem({ name: 'Stew', portions: 1, frozenDate: '2026-09-01', expiryDate: '2026-11-01' })
+    await createFreezerItem({ name: 'Old', portions: 0, frozenDate: '2026-01-01', expiryDate: '2026-02-01' })
+    render(<CalendarView />)
+    expect(await screen.findByText('2 freezer items expire soon')).toBeInTheDocument()
+  })
+
+  it('is hidden when nothing is expiring', async () => {
+    await createFreezerItem({ name: 'Soup', portions: 1, frozenDate: '2026-09-01', expiryDate: '2027-01-01' })
+    render(<CalendarView />)
+    await screen.findByTestId('month-grid')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByText(/freezer item/)).toBeNull()
   })
 })

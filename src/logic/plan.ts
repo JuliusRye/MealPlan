@@ -1,5 +1,6 @@
 import { db, newId, type PlanEntry } from '../db'
 import { addDaysISO, compareISO, diffDaysISO, formatRange, isISODate, type ISODate } from './dates'
+import { moveFreezerStock } from './freezer'
 import { createMeal } from './meals'
 
 /** The user-editable fields of a plan entry. */
@@ -32,7 +33,10 @@ export interface WeekBar {
   continuesAfter: boolean
 }
 
-/** Trim text and drop an empty note. Throws on a missing title or bad dates. */
+/**
+ * Trim text and drop an empty note. Throws on a missing title, bad dates or a
+ * bad freezer portion count; a portion count without a freezer item is dropped.
+ */
 export function cleanPlanInput(input: PlanInput): PlanInput {
   const title = input.title.trim()
   if (!title) throw new Error('A dinner needs a title')
@@ -41,8 +45,14 @@ export function cleanPlanInput(input: PlanInput): PlanInput {
   if (compareISO(input.endDate, input.startDate) < 0) throw new Error('The end date cannot be before the start date')
   const clean: PlanInput = { title, startDate: input.startDate, endDate: input.endDate }
   if (input.mealId) clean.mealId = input.mealId
-  if (input.freezerItemId) clean.freezerItemId = input.freezerItemId
-  if (input.portionsFromFreezer !== undefined) clean.portionsFromFreezer = input.portionsFromFreezer
+  if (input.freezerItemId) {
+    const portions = input.portionsFromFreezer
+    if (portions === undefined || !Number.isInteger(portions) || portions < 1) {
+      throw new Error('portions from the freezer must be a whole number, 1 or more')
+    }
+    clean.freezerItemId = input.freezerItemId
+    clean.portionsFromFreezer = portions
+  }
   const note = input.note?.trim()
   if (note) clean.note = note
   return clean
@@ -53,17 +63,26 @@ export function entryDays(entry: DateSpan): number {
   return diffDaysISO(entry.endDate, entry.startDate) + 1
 }
 
+/** Takes any freezer portions in the same transaction. Throws NotEnoughPortionsError if the stock is short. */
 export async function createPlanEntry(input: PlanInput): Promise<PlanEntry> {
   const entry: PlanEntry = { ...cleanPlanInput(input), id: newId() }
-  await db.plan.add(entry)
-  return entry
+  return db.transaction('rw', db.plan, db.freezer, async () => {
+    await moveFreezerStock(undefined, entry)
+    await db.plan.add(entry)
+    return entry
+  })
 }
 
-/** Replaces all editable fields, so fields missing from `input` are cleared. */
+/**
+ * Replaces all editable fields, so fields missing from `input` are cleared.
+ * Freezer stock moves by the difference in the same transaction.
+ */
 export async function updatePlanEntry(id: string, input: PlanInput): Promise<PlanEntry> {
   const entry: PlanEntry = { ...cleanPlanInput(input), id }
-  return db.transaction('rw', db.plan, async () => {
-    if (!(await db.plan.get(id))) throw new Error(`Plan entry ${id} not found`)
+  return db.transaction('rw', db.plan, db.freezer, async () => {
+    const existing = await db.plan.get(id)
+    if (!existing) throw new Error(`Plan entry ${id} not found`)
+    await moveFreezerStock(existing, entry)
     await db.plan.put(entry)
     return entry
   })
@@ -78,15 +97,21 @@ export async function savePlanEntry(
   input: PlanInput,
   { id, saveToLibrary = false }: { id?: string; saveToLibrary?: boolean } = {},
 ): Promise<PlanEntry> {
-  return db.transaction('rw', db.plan, db.meals, async () => {
+  return db.transaction('rw', db.plan, db.meals, db.freezer, async () => {
     let clean = cleanPlanInput(input)
     if (saveToLibrary && !clean.mealId) clean = { ...clean, mealId: (await createMeal({ name: clean.title })).id }
     return id ? updatePlanEntry(id, clean) : createPlanEntry(clean)
   })
 }
 
+/** Returns any freezer portions in the same transaction. */
 export async function deletePlanEntry(id: string): Promise<void> {
-  await db.plan.delete(id)
+  await db.transaction('rw', db.plan, db.freezer, async () => {
+    const existing = await db.plan.get(id)
+    if (!existing) return
+    await moveFreezerStock(existing, undefined)
+    await db.plan.delete(id)
+  })
 }
 
 function byStart(a: PlanEntry, b: PlanEntry): number {

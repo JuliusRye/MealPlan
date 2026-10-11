@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useRef, useState } from 'react'
 import PlanEntrySheet from '../components/PlanEntrySheet'
-import type { PlanEntry } from '../db'
+import { db, type PlanEntry } from '../db'
 import { useToday } from '../hooks/useToday'
 import {
   addDaysISO,
@@ -15,6 +15,7 @@ import {
   startOfMonthISO,
   type ISODate,
 } from '../logic/dates'
+import { expiryBanner } from '../logic/freezer'
 import { entriesInRange, entryDays, layoutWeekBars, unplannedDays, upcomingEntries } from '../logic/plan'
 
 type Mode = 'month' | 'agenda'
@@ -24,7 +25,14 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 /** Minimum horizontal travel in px for a touch to count as a swipe. */
 const SWIPE_MIN = 50
 
-const entryLabel = (entry: PlanEntry) => `${entry.title}, ${formatRange(entry.startDate, entry.endDate)}`
+const entryLabel = (entry: PlanEntry) =>
+  `${entry.title}${entry.freezerItemId ? ', from the freezer' : ''}, ${formatRange(entry.startDate, entry.endDate)}`
+
+const FreezerMarker = () => (
+  <span className="freezer-marker" aria-hidden="true">
+    ❄
+  </span>
+)
 
 export default function CalendarView() {
   const today = useToday()
@@ -33,6 +41,7 @@ export default function CalendarView() {
   const [sheet, setSheet] = useState<Sheet>()
   const closeSheet = useCallback(() => setSheet(undefined), [])
   const openEntry = (entry: PlanEntry) => setSheet({ kind: 'edit', entry })
+  const banner = useLiveQuery(async () => expiryBanner(await db.freezer.toArray(), today), [today])
 
   return (
     <section className="screen">
@@ -46,6 +55,12 @@ export default function CalendarView() {
           ))}
         </div>
       </div>
+      {banner && (
+        <p className="freezer-banner" role="status">
+          <FreezerMarker />
+          <span>{banner}</span>
+        </p>
+      )}
 
       {mode === 'month' ? (
         <MonthGrid
@@ -204,6 +219,7 @@ function WeekRow({ weekStart, month, today, entries, unplanned, onPlan, onOpen }
             aria-label={entryLabel(bar.entry)}
             onClick={() => onOpen(bar.entry)}
           >
+            {bar.entry.freezerItemId && <FreezerMarker />}
             {bar.entry.title}
           </button>
         )
@@ -233,7 +249,15 @@ function Agenda({ today, onPlan, onOpen }: PaneProps) {
               <li key={entry.id}>
                 <button type="button" className="agenda-row" onClick={() => onOpen(entry)}>
                   <span className="agenda-date">{formatRange(entry.startDate, entry.endDate, { year })}</span>
-                  <span className="meal-name">{entry.title}</span>
+                  <span className="meal-name">
+                    {entry.freezerItemId && (
+                      <>
+                        <FreezerMarker />
+                        <span className="visually-hidden">From the freezer: </span>
+                      </>
+                    )}
+                    {entry.title}
+                  </span>
                   {days > 1 && <span className="agenda-meta">{days} days</span>}
                   {entry.note && <span className="agenda-meta">{entry.note}</span>}
                 </button>

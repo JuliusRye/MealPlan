@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import type { FreezerItem, Meal } from '../db'
+import type { Meal } from '../db'
 import { compareISO, isISODate, todayISO } from '../logic/dates'
 import type { FreezerInput } from '../logic/freezer'
 
@@ -12,7 +12,8 @@ interface Errors {
 }
 
 interface Props {
-  initial?: FreezerItem
+  /** The item to edit, or prefilled fields for a new one. */
+  initial?: Partial<FreezerInput>
   /** Library meals to pick from, sorted for display. */
   meals: readonly Meal[]
   onSave: (input: FreezerInput) => Promise<void>
@@ -25,7 +26,7 @@ export default function FreezerItemForm({ initial, meals, onSave, onCancel }: Pr
   // Drop a link to a meal that has since been deleted from the library.
   const [mealId, setMealId] = useState(() => meals.find((m) => m.id === initial?.mealId)?.id ?? '')
   const [name, setName] = useState(initial?.name ?? '')
-  const [portions, setPortions] = useState(initial?.portions.toString() ?? '1')
+  const [portions, setPortions] = useState(initial?.portions?.toString() ?? '1')
   const [frozenDate, setFrozenDate] = useState(initial?.frozenDate ?? todayISO())
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate ?? '')
   const [note, setNote] = useState(initial?.note ?? '')

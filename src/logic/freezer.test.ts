@@ -7,8 +7,11 @@ import {
   createFreezerItem,
   deleteFreezerItem,
   expiryLabel,
+  expiryBanner,
   expiryStatus,
+  NotEnoughPortionsError,
   splitFreezer,
+  stockChanges,
   updateFreezerItem,
   type FreezerInput,
 } from './freezer'
@@ -79,7 +82,10 @@ describe('splitFreezer', () => {
   })
 
   it('breaks expiry ties by name', () => {
-    const { inStock } = splitFreezer([item('2026-12-01', { id: 'b', name: 'Soup' }), item('2026-12-01', { id: 'a', name: 'chili' })])
+    const { inStock } = splitFreezer([
+      item('2026-12-01', { id: 'b', name: 'Soup' }),
+      item('2026-12-01', { id: 'a', name: 'chili' }),
+    ])
     expect(inStock.map((i) => i.name)).toEqual(['chili', 'Soup'])
   })
 })
@@ -96,6 +102,69 @@ describe('countExpiryWarnings', () => {
       item('2026-10-15', { portions: 0 }), // soon but used up
     ]
     expect(countExpiryWarnings(items, today)).toBe(3)
+  })
+})
+
+describe('expiryBanner', () => {
+  const today = '2026-10-11'
+
+  it('is undefined when nothing in stock is soon or expired', () => {
+    expect(expiryBanner([], today)).toBeUndefined()
+    expect(expiryBanner([item('2026-12-01'), item('2026-10-01', { portions: 0 })], today)).toBeUndefined()
+  })
+
+  it('counts items expiring soon', () => {
+    expect(expiryBanner([item('2026-10-20')], today)).toBe('1 freezer item expires soon')
+    expect(expiryBanner([item('2026-10-20'), item('2026-11-01')], today)).toBe('2 freezer items expire soon')
+  })
+
+  it('counts expired items separately', () => {
+    expect(expiryBanner([item('2026-10-01')], today)).toBe('1 freezer item has expired')
+    expect(expiryBanner([item('2026-10-01'), item('2026-10-02')], today)).toBe('2 freezer items have expired')
+    expect(expiryBanner([item('2026-10-01'), item('2026-10-20'), item('2026-11-01')], today)).toBe(
+      '1 freezer item has expired, 2 expire soon',
+    )
+  })
+})
+
+describe('stockChanges', () => {
+  const take = (freezerItemId: string, portionsFromFreezer: number) => ({ freezerItemId, portionsFromFreezer })
+
+  it('takes portions for a new freezer entry', () => {
+    expect(stockChanges(undefined, take('f1', 2))).toEqual(new Map([['f1', -2]]))
+  })
+
+  it('returns portions for a deleted freezer entry', () => {
+    expect(stockChanges(take('f1', 2), undefined)).toEqual(new Map([['f1', 2]]))
+  })
+
+  it('adjusts by the difference when the portion count changes', () => {
+    expect(stockChanges(take('f1', 2), take('f1', 3))).toEqual(new Map([['f1', -1]]))
+    expect(stockChanges(take('f1', 3), take('f1', 1))).toEqual(new Map([['f1', 2]]))
+  })
+
+  it('returns everything to the old item when switching items or leaving the freezer', () => {
+    expect(stockChanges(take('f1', 2), take('f2', 1))).toEqual(
+      new Map([
+        ['f1', 2],
+        ['f2', -1],
+      ]),
+    )
+    expect(stockChanges(take('f1', 2), {})).toEqual(new Map([['f1', 2]]))
+  })
+
+  it('changes nothing for unchanged or non-freezer entries', () => {
+    expect(stockChanges(take('f1', 2), take('f1', 2))).toEqual(new Map())
+    expect(stockChanges({}, {})).toEqual(new Map())
+    expect(stockChanges(undefined, undefined)).toEqual(new Map())
+  })
+})
+
+describe('NotEnoughPortionsError', () => {
+  it('says how many portions are available', () => {
+    expect(new NotEnoughPortionsError(1).message).toBe('Only 1 portion left in the freezer')
+    expect(new NotEnoughPortionsError(3).available).toBe(3)
+    expect(new NotEnoughPortionsError(0).message).toBe('No portions left in the freezer')
   })
 })
 
@@ -124,7 +193,9 @@ describe('cleanFreezerInput', () => {
 
   it('rejects an expiry date before the frozen date', () => {
     expect(() => cleanFreezerInput(input({ frozenDate: '2026-10-02', expiryDate: '2026-10-01' }))).toThrow(/expiry/)
-    expect(cleanFreezerInput(input({ frozenDate: '2026-10-01', expiryDate: '2026-10-01' })).expiryDate).toBe('2026-10-01')
+    expect(cleanFreezerInput(input({ frozenDate: '2026-10-01', expiryDate: '2026-10-01' })).expiryDate).toBe(
+      '2026-10-01',
+    )
   })
 
   it('requires a whole, non-negative portion count', () => {

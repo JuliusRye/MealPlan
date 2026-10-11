@@ -6,11 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] Create, edit and delete a free-text entry spanning one or more days (end ≥ start enforced)
-- [ ] Range query returns entries where start ≤ to and end ≥ from (unit-tested)
-- [ ] Week bar layout computes column start/span and lane, splitting entries across weeks and months (unit-tested, incl. entries crossing week and month boundaries)
-- [ ] Overlap detection warns without blocking save (unit-tested)
-- [ ] Swipe, prev/next and Today navigation work; months far in past/future render
-- [ ] Unplanned days in the next 7 days are highlighted
-- [ ] Agenda toggle shows upcoming entries in date order and tapping one opens the edit sheet
-- [ ] Usable at ~360×780 viewport
+- [x] Create, edit and delete a free-text entry spanning one or more days (end ≥ start enforced)
+- [x] Range query returns entries where start ≤ to and end ≥ from (unit-tested)
+- [x] Week bar layout computes column start/span and lane, splitting entries across weeks and months (unit-tested, incl. entries crossing week and month boundaries)
+- [x] Overlap detection warns without blocking save (unit-tested)
+- [x] Swipe, prev/next and Today navigation work; months far in past/future render
+- [x] Unplanned days in the next 7 days are highlighted
+- [x] Agenda toggle shows upcoming entries in date order and tapping one opens the edit sheet
+- [x] Usable at ~360×780 viewport

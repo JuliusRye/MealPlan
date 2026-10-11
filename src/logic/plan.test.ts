@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { db, type PlanEntry } from '../db'
+import { createFreezerItem, NotEnoughPortionsError } from './freezer'
 import {
   cleanPlanInput,
   createPlanEntry,
@@ -48,6 +49,16 @@ describe('cleanPlanInput', () => {
     expect(cleanPlanInput(linked)).toEqual(linked)
   })
 
+  it('requires a whole, positive portion count for a freezer entry', () => {
+    expect(() => cleanPlanInput(input({ freezerItemId: 'f1' }))).toThrow(/portions/)
+    expect(() => cleanPlanInput(input({ freezerItemId: 'f1', portionsFromFreezer: 0 }))).toThrow(/portions/)
+    expect(() => cleanPlanInput(input({ freezerItemId: 'f1', portionsFromFreezer: 1.5 }))).toThrow(/portions/)
+  })
+
+  it('drops a portion count without a freezer item', () => {
+    expect(cleanPlanInput(input({ portionsFromFreezer: 2 }))).toEqual(input())
+  })
+
   it('requires a title', () => {
     expect(() => cleanPlanInput(input({ title: ' ' }))).toThrow(/title/)
   })
@@ -93,6 +104,89 @@ describe('plan storage', () => {
   it('fails to update a missing entry', async () => {
     await expect(updatePlanEntry('nope', input())).rejects.toThrow(/not found/)
     expect(await db.plan.count()).toBe(0)
+  })
+})
+
+describe('plan storage with freezer stock', () => {
+  const freezerItem = (portions: number, name = 'Chili') =>
+    createFreezerItem({ name, portions, frozenDate: '2026-10-01', expiryDate: '2027-01-01' })
+  const stock = async (id: string) => (await db.freezer.get(id))?.portions
+
+  it('takes portions when planning from the freezer and returns them on delete', async () => {
+    const { id: f1 } = await freezerItem(3)
+    const created = await createPlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 2 }))
+    expect(await stock(f1)).toBe(1)
+    await deletePlanEntry(created.id)
+    expect(await stock(f1)).toBe(3)
+    expect(await db.plan.count()).toBe(0)
+  })
+
+  it('adjusts stock by the difference when the portion count is edited', async () => {
+    const { id: f1 } = await freezerItem(3)
+    const { id } = await createPlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 1 }))
+    await updatePlanEntry(id, input({ freezerItemId: f1, portionsFromFreezer: 3 }))
+    expect(await stock(f1)).toBe(0)
+    await updatePlanEntry(id, input({ freezerItemId: f1, portionsFromFreezer: 2 }))
+    expect(await stock(f1)).toBe(1)
+  })
+
+  it('returns all portions when switching away from the freezer or to another item', async () => {
+    const { id: f1 } = await freezerItem(3)
+    const { id: f2 } = await freezerItem(2, 'Soup')
+    const { id } = await createPlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 2 }))
+    await updatePlanEntry(id, input({ freezerItemId: f2, portionsFromFreezer: 1 }))
+    expect([await stock(f1), await stock(f2)]).toEqual([3, 1])
+    await updatePlanEntry(id, input())
+    expect([await stock(f1), await stock(f2)]).toEqual([3, 2])
+    expect(await db.plan.get(id)).toEqual({ ...input(), id })
+  })
+
+  it('refuses to take more than is in stock, writing neither stock nor entry', async () => {
+    const { id: f1 } = await freezerItem(2)
+    const error = await createPlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 3 })).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(NotEnoughPortionsError)
+    expect((error as NotEnoughPortionsError).available).toBe(2)
+    expect(await stock(f1)).toBe(2)
+    expect(await db.plan.count()).toBe(0)
+  })
+
+  it('counts the portions an entry already holds as available when editing it', async () => {
+    const { id: f1 } = await freezerItem(3)
+    const { id } = await createPlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 2 }))
+    const error = await updatePlanEntry(id, input({ freezerItemId: f1, portionsFromFreezer: 4 })).catch(
+      (e: unknown) => e,
+    )
+    expect((error as NotEnoughPortionsError).available).toBe(3)
+    expect(await stock(f1)).toBe(1)
+    expect((await db.plan.get(id))?.portionsFromFreezer).toBe(2)
+    await updatePlanEntry(id, input({ freezerItemId: f1, portionsFromFreezer: 3, title: 'All of it' }))
+    expect(await stock(f1)).toBe(0)
+  })
+
+  it('cannot take from a freezer item that no longer exists', async () => {
+    await expect(createPlanEntry(input({ freezerItemId: 'gone', portionsFromFreezer: 1 }))).rejects.toThrow(
+      NotEnoughPortionsError,
+    )
+    expect(await db.plan.count()).toBe(0)
+  })
+
+  it('still edits and deletes an entry whose freezer item was deleted', async () => {
+    const { id: f1 } = await freezerItem(3)
+    const { id } = await createPlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 2 }))
+    await db.freezer.delete(f1)
+    await updatePlanEntry(id, input({ freezerItemId: f1, portionsFromFreezer: 2, note: 'Kept' }))
+    await deletePlanEntry(id)
+    expect(await db.plan.count()).toBe(0)
+    expect(await db.freezer.count()).toBe(0)
+  })
+
+  it('rolls back the new library meal when savePlanEntry runs out of stock', async () => {
+    const { id: f1 } = await freezerItem(1)
+    await expect(
+      savePlanEntry(input({ freezerItemId: f1, portionsFromFreezer: 2 }), { saveToLibrary: true }),
+    ).rejects.toThrow(NotEnoughPortionsError)
+    expect(await db.meals.count()).toBe(0)
+    expect(await stock(f1)).toBe(1)
   })
 })
 
@@ -157,15 +251,15 @@ describe('findOverlaps', () => {
 
 describe('overlapWarning', () => {
   it('names the clashing day and dinner', () => {
-    expect(overlapWarning({ startDate: '2026-10-11', endDate: '2026-10-13' }, entry('Chili', '2026-10-13', '2026-10-15'))).toBe(
-      'Tue 13 Oct already has Chili',
-    )
+    expect(
+      overlapWarning({ startDate: '2026-10-11', endDate: '2026-10-13' }, entry('Chili', '2026-10-13', '2026-10-15')),
+    ).toBe('Tue 13 Oct already has Chili')
   })
 
   it('names the clashing days when several overlap', () => {
-    expect(overlapWarning({ startDate: '2026-10-12', endDate: '2026-10-20' }, entry('Chili', '2026-10-10', '2026-10-14'))).toBe(
-      'Mon 12 – Wed 14 Oct already have Chili',
-    )
+    expect(
+      overlapWarning({ startDate: '2026-10-12', endDate: '2026-10-20' }, entry('Chili', '2026-10-10', '2026-10-14')),
+    ).toBe('Mon 12 – Wed 14 Oct already have Chili')
   })
 })
 
@@ -242,7 +336,11 @@ describe('layoutWeekBars', () => {
 
 describe('unplannedDays', () => {
   it('lists the days in the next week without a dinner, starting today', () => {
-    const entries = [entry('a', '2026-10-09', '2026-10-12'), entry('b', '2026-10-14', '2026-10-15'), entry('c', '2026-10-17', '2026-10-30')]
+    const entries = [
+      entry('a', '2026-10-09', '2026-10-12'),
+      entry('b', '2026-10-14', '2026-10-15'),
+      entry('c', '2026-10-17', '2026-10-30'),
+    ]
     expect(unplannedDays('2026-10-11', entries)).toEqual(['2026-10-13', '2026-10-16'])
   })
 
@@ -315,11 +413,7 @@ describe('mealPlanStats', () => {
   })
 
   it('counts every entry and finds the latest one started by today', () => {
-    const entries = [
-      entry('a', '2026-09-01', '2026-09-02'),
-      entry('b', '2026-10-05'),
-      entry('c', '2025-12-24'),
-    ]
+    const entries = [entry('a', '2026-09-01', '2026-09-02'), entry('b', '2026-10-05'), entry('c', '2025-12-24')]
     expect(mealPlanStats(entries, today)).toEqual({ timesPlanned: 3, lastPlanned: '2026-10-05' })
   })
 

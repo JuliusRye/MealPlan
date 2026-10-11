@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] Planning from the freezer decreases stock; deleting the entry restores it
-- [ ] Editing the portion count adjusts stock by the difference; switching away from the freezer source returns all portions
-- [ ] Cannot take more portions than in stock (validation message shown)
-- [ ] Take/return/edit arithmetic and transactional behaviour are unit-tested
-- [ ] ❄ marker on freezer-sourced bars and agenda rows
-- [ ] "Leftovers → freezer" prefills name, mealId and frozen date
-- [ ] Calendar banner shows count of soon/expired freezer items and is hidden when zero
+- [x] Planning from the freezer decreases stock; deleting the entry restores it
+- [x] Editing the portion count adjusts stock by the difference; switching away from the freezer source returns all portions
+- [x] Cannot take more portions than in stock (validation message shown)
+- [x] Take/return/edit arithmetic and transactional behaviour are unit-tested
+- [x] ❄ marker on freezer-sourced bars and agenda rows
+- [x] "Leftovers → freezer" prefills name, mealId and frozen date
+- [x] Calendar banner shows count of soon/expired freezer items and is hidden when zero
