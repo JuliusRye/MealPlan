@@ -6,11 +6,19 @@
 
 **Status:** ready-for-agent
 
-- [ ] `npm run dev`, `npm run build`, `npm run preview` and `npm test` all work
-- [ ] Four tabs switch between placeholder screens (simple state router, no router library)
-- [ ] Manifest + icons pass Chrome's installability check; the app reloads offline after first load
-- [ ] Update prompt appears when a new service worker is waiting
-- [ ] `navigator.storage.persist()` is requested on first launch
-- [ ] Dexie schema v1 defines `meals`, `mealImages`, `plan`, `freezer` with the indexes from PLAN.md; ids via `crypto.randomUUID()`
-- [ ] Date helpers have unit tests (parsing/formatting local ISO dates, no timezone off-by-one)
-- [ ] Light/dark theme follows `prefers-color-scheme`
+- [x] `npm run dev`, `npm run build`, `npm run preview` and `npm test` all work
+- [x] Four tabs switch between placeholder screens (simple state router, no router library)
+- [x] Manifest + icons pass Chrome's installability check; the app reloads offline after first load
+- [x] Update prompt appears when a new service worker is waiting
+- [x] `navigator.storage.persist()` is requested on first launch
+- [x] Dexie schema v1 defines `meals`, `mealImages`, `plan`, `freezer` with the indexes from PLAN.md; ids via `crypto.randomUUID()`
+- [x] Date helpers have unit tests (parsing/formatting local ISO dates, no timezone off-by-one)
+- [x] Light/dark theme follows `prefers-color-scheme`
+
+## Comments
+
+**2026-10-11, implementation (agent):** Done in the working tree, not committed.
+- Verified: `npm test` (20 tests, TZ pinned to Europe/Copenhagen), `typecheck`, `lint`, `build`, `dev`. In headless Chromium: no installability errors, offline reload + tab switching work, the update prompt appears after a rebuild and Reload activates the new SW.
+- Not verified yet: install and `persisted()` on the S23 (headless Chrome returns `persisted() === false` by heuristic).
+- Deviations: persistence is requested on every launch until granted (not only the first); icons live in `public/` (generator default), not `public/icons/`; no periodic update check while the app stays open.
+- Review follow-ups left for later: tab list is defined in both `TabBar.tsx` and `App.tsx`; `ISODate` is a plain string alias; `PlanEntry.freezerItemId`/`portionsFromFreezer` can be set independently.
