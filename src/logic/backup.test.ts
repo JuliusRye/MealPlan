@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parse } from 'yaml'
+import { parse, stringify } from 'yaml'
 import { db, newId } from '../db'
 import {
   backupFilename,
+  BackupError,
   blobToBase64,
   exportBackup,
   formatBytes,
   needsBackupReminder,
+  readBackup,
   readLastExport,
+  restoreBackup,
   shareOrDownload,
   writeLastExport,
 } from './backup'
@@ -53,6 +56,118 @@ describe('exportBackup', () => {
   it('exports empty tables as empty lists', async () => {
     const doc = parse(await (await exportBackup(now)).text())
     expect(doc).toMatchObject({ version: 1, meals: [], mealImages: [], plan: [], freezer: [] })
+  })
+})
+
+async function snapshot() {
+  return {
+    meals: await db.meals.toArray(),
+    mealImages: await db.mealImages.toArray(),
+    plan: await db.plan.toArray(),
+    freezer: await db.freezer.toArray(),
+  }
+}
+
+function yamlFile(doc: unknown) {
+  return new File([stringify(doc)], 'backup.yaml')
+}
+
+/** A valid backup document with nothing in it, to break one piece at a time. */
+function emptyBackup() {
+  return { version: 1, exportedAt: now.toISOString(), meals: [], mealImages: [], plan: [], freezer: [] }
+}
+
+describe('readBackup + restoreBackup', () => {
+  it('round-trips an export, restoring every table and image bytes', async () => {
+    await seed()
+    const before = await snapshot()
+    const beforeBytes = new Uint8Array(await before.mealImages[0].blob.arrayBuffer())
+    const file = await exportBackup(now)
+
+    await Promise.all(db.tables.map((t) => t.clear()))
+    await db.meals.add({ id: newId(), name: 'Leftover', createdAt: 9, updatedAt: 9 })
+
+    const backup = await readBackup(file)
+    await restoreBackup(backup)
+
+    const after = await snapshot()
+    expect(after.meals).toEqual(before.meals)
+    expect(after.plan).toEqual(before.plan)
+    expect(after.freezer).toEqual(before.freezer)
+    const withoutBlob = (images: typeof before.mealImages) => images.map((image) => ({ ...image, blob: null }))
+    expect(withoutBlob(after.mealImages)).toEqual(withoutBlob(before.mealImages))
+    const blob = after.mealImages[0].blob
+    expect(blob).toBeInstanceOf(Blob)
+    expect(blob.type).toBe('image/webp')
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(beforeBytes)
+  })
+
+  it('summarises what the backup contains', async () => {
+    await seed()
+    const backup = await readBackup(await exportBackup(now))
+    expect(backup.exportedAt).toBe(now.toISOString())
+    expect([backup.meals.length, backup.mealImages.length, backup.plan.length, backup.freezer.length]).toEqual([1, 1, 1, 1])
+  })
+
+  it('restores an empty backup by emptying every table', async () => {
+    await seed()
+    await restoreBackup(await readBackup(yamlFile(emptyBackup())))
+    expect(await snapshot()).toEqual({ meals: [], mealImages: [], plan: [], freezer: [] })
+  })
+
+  it('leaves existing data untouched if writing fails part-way', async () => {
+    await seed()
+    const before = await snapshot()
+    const meal = { id: 'same', name: 'Twice', createdAt: 1, updatedAt: 1 }
+    const backup = await readBackup(yamlFile({ ...emptyBackup(), meals: [meal, meal] }))
+
+    await expect(restoreBackup(backup)).rejects.toThrow()
+    expect(await snapshot()).toEqual(before)
+  })
+})
+
+describe('readBackup rejects invalid files', () => {
+  async function rejection(file: File) {
+    const error = await readBackup(file).then(() => undefined, (e: unknown) => e)
+    expect(error).toBeInstanceOf(BackupError)
+    return (error as BackupError).message
+  }
+
+  it('rejects malformed YAML', async () => {
+    expect(await rejection(new File(['meals: [unclosed'], 'x.yaml'))).toMatch(/not a valid mealplan backup/i)
+  })
+
+  it('rejects a file that is not a backup document', async () => {
+    expect(await rejection(new File(['just some text'], 'x.txt'))).toMatch(/not a valid mealplan backup/i)
+    expect(await rejection(new File([''], 'x.yaml'))).toMatch(/not a valid mealplan backup/i)
+  })
+
+  it('rejects a missing or unknown version', async () => {
+    const { version: _, ...noVersion } = emptyBackup()
+    expect(await rejection(yamlFile(noVersion))).toMatch(/not a valid mealplan backup/i)
+    expect(await rejection(yamlFile({ ...emptyBackup(), version: 'one' }))).toMatch(/not a valid mealplan backup/i)
+  })
+
+  it('rejects a backup from a newer version', async () => {
+    expect(await rejection(yamlFile({ ...emptyBackup(), version: 2 }))).toMatch(/newer version/i)
+  })
+
+  it('rejects a missing table', async () => {
+    const { freezer: _, ...noFreezer } = emptyBackup()
+    expect(await rejection(yamlFile(noFreezer))).toMatch(/freezer/)
+  })
+
+  it.each([
+    ['meals', { id: 'm', createdAt: 1, updatedAt: 1 }, /meals\[0\]\.name/],
+    ['meals', { id: 'm', name: 'x', difficulty: 'extreme', createdAt: 1, updatedAt: 1 }, /meals\[0\]\.difficulty/],
+    ['plan', { id: 'p', startDate: '12/10/2026', endDate: '2026-10-12', title: 'x' }, /plan\[0\]\.startDate/],
+    ['plan', { id: 'p', startDate: '2026-10-13', endDate: '2026-10-12', title: 'x' }, /plan\[0\]\.endDate/],
+    ['freezer', { id: 'f', name: 'x', portions: '2', frozenDate: '2026-09-01', expiryDate: '2027-01-01' }, /freezer\[0\]\.portions/],
+    ['mealImages', { id: 'i', mealId: 'm', kind: 'result', order: 0, createdAt: 1, mimeType: 'image/webp' }, /mealImages\[0\]\.data/],
+    ['mealImages', { id: 'i', mealId: 'm', kind: 'result', order: 0, createdAt: 1, mimeType: 'image/webp', data: '***' }, /mealImages\[0\]\.data/],
+    ['meals', 'not a record', /meals\[0\]/],
+  ])('rejects a bad %s record', async (table, record, message) => {
+    expect(await rejection(yamlFile({ ...emptyBackup(), [table]: [record] }))).toMatch(message)
   })
 })
 

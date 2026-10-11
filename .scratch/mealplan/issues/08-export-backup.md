@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] Exported YAML contains every table, with images as base64 + mimeType
-- [ ] Share sheet is used when `navigator.share` with files is supported; download otherwise
-- [ ] File size is shown after export
-- [ ] Last export date is shown; reminder appears after 30 days
-- [ ] App version is shown
-- [ ] Export serialisation is unit-tested
+- [x] Exported YAML contains every table, with images as base64 + mimeType
+- [x] Share sheet is used when `navigator.share` with files is supported; download otherwise
+- [x] File size is shown after export
+- [x] Last export date is shown; reminder appears after 30 days
+- [x] App version is shown
+- [x] Export serialisation is unit-tested

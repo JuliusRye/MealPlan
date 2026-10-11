@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { db } from '../db'
+import { stringify } from 'yaml'
+import { db, newId } from '../db'
 import { writeLastExport } from '../logic/backup'
 import SettingsView from './SettingsView'
 
@@ -54,5 +55,50 @@ describe('SettingsView', () => {
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce()
     expect(screen.getByText(/sunday 11 october 2026/i)).toBeInTheDocument()
     expect(screen.queryByText(/no backup in the last 30 days/i)).not.toBeInTheDocument()
+  })
+
+  describe('import', () => {
+    const backupYaml = (meals: object[]) =>
+      stringify({ version: 1, exportedAt: '2026-10-01T10:00:00.000Z', meals, mealImages: [], plan: [], freezer: [] })
+
+    function pickFile(contents: string) {
+      fireEvent.change(screen.getByLabelText(/import backup/i), {
+        target: { files: [new File([contents], 'backup.yaml')] },
+      })
+    }
+
+    beforeEach(async () => {
+      await db.meals.add({ id: newId(), name: 'Current meal', createdAt: 1, updatedAt: 1 })
+    })
+
+    it('rejects an invalid file with a message and keeps the data', async () => {
+      render(<SettingsView />)
+      pickFile('version: 99')
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/newer version/i)
+      expect(screen.queryByRole('button', { name: /replace all data/i })).not.toBeInTheDocument()
+      expect((await db.meals.toArray()).map((m) => m.name)).toEqual(['Current meal'])
+    })
+
+    it('asks for confirmation before replacing the data', async () => {
+      render(<SettingsView />)
+      pickFile(backupYaml([{ id: 'a', name: 'Restored meal', createdAt: 1, updatedAt: 1 }]))
+
+      expect(await screen.findByText(/1 meal, 0 photos, 0 plan entries and 0 freezer items/i)).toBeInTheDocument()
+      expect((await db.meals.toArray()).map((m) => m.name)).toEqual(['Current meal'])
+
+      fireEvent.click(screen.getByRole('button', { name: /replace all data/i }))
+      expect(await screen.findByText(/backup restored/i)).toBeInTheDocument()
+      expect((await db.meals.toArray()).map((m) => m.name)).toEqual(['Restored meal'])
+    })
+
+    it('does nothing when the confirmation is cancelled', async () => {
+      render(<SettingsView />)
+      pickFile(backupYaml([]))
+
+      fireEvent.click(await screen.findByRole('button', { name: /cancel/i }))
+      expect(screen.queryByRole('button', { name: /replace all data/i })).not.toBeInTheDocument()
+      expect((await db.meals.toArray()).map((m) => m.name)).toEqual(['Current meal'])
+    })
   })
 })

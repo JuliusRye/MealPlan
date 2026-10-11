@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Wrong version or malformed file is rejected with a message; data is unchanged
-- [ ] Confirmation is required before replacing data
-- [ ] All tables are replaced atomically
-- [ ] Round-trip unit test: export → import restores all tables, including an image Blob byte-for-byte
-- [ ] Manual check: export, clear site data, import, everything (incl. images) is back
+- [x] Wrong version or malformed file is rejected with a message; data is unchanged
+- [x] Confirmation is required before replacing data
+- [x] All tables are replaced atomically
+- [x] Round-trip unit test: export → import restores all tables, including an image Blob byte-for-byte
+- [x] Manual check: export, clear site data, import, everything (incl. images) is back

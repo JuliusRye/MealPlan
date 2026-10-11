@@ -1016,3 +1016,9 @@ textarea:focus-visible {
   background: var(--chip-soon-bg);
   color: var(--chip-soon-fg);
 }
+
+.import-confirm {
+  padding: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+}
