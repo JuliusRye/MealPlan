@@ -42,7 +42,15 @@ On the same Wi-Fi as the PC:
 npm run dev -- --host
 ```
 
-Open the *Network* URL it prints (e.g. `http://192.168.x.x:5173`) in Chrome on the phone. This is for looking at the UI only. Installing to the home screen and offline use need HTTPS, which comes with the GitHub Pages deploy (ticket 10).
+Open the *Network* URL it prints (e.g. `http://192.168.x.x:5173`) in Chrome on the phone. This is for looking at the UI only. Installing to the home screen and offline use need HTTPS; use the deployed version below for that.
+
+## Deployed version (GitHub Pages)
+
+Every push to `master` runs `.github/workflows/deploy.yml`, which lints, tests, builds and publishes `dist/` to:
+
+**https://juliusrye.github.io/MealPlan/**
+
+Follow the run under the repo's *Actions* tab (it can also be started by hand there with *Run workflow*). On the phone, open the URL in Chrome and choose *Add to home screen* / *Install app*. After opening it once online it works offline, including in airplane mode. Data lives in the phone's browser storage, so it is separate from the PC's and survives app updates.
 
 ## Other commands
 

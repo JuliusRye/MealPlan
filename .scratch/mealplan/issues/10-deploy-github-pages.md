@@ -8,7 +8,7 @@
 
 **Important:** Ask the user before creating or pushing to any GitHub repo; they need to create it or authorise `gh`.
 
-- [ ] Vite base path matches the Pages URL; assets and service worker load correctly there
-- [ ] Workflow builds and deploys on push to the default branch
+- [x] Vite base path matches the Pages URL; assets and service worker load correctly there
+- [x] Workflow builds and deploys on push to the default branch
 - [ ] Deployed app passes the installability check and works offline
 - [ ] Manual check on the phone: install via Chrome, enable airplane mode, app opens with data intact
